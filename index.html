@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ApexUAV — Tactical Drone Flight Simulator & Pilot Academy</title>
+    <title>ApexUAV Defense Edition — Tactical Drone Flight Simulator & GCS Command</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Three.js & OrbitControls -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -15,8 +16,8 @@
 
         body {
             font-family: 'JetBrains Mono', 'Tajawal', monospace;
-            background-color: #030712;
-            color: #f9fafb;
+            background-color: #020617;
+            color: #f8fafc;
             overflow: hidden;
             touch-action: none;
             user-select: none;
@@ -24,16 +25,21 @@
 
         .font-chakra { font-family: 'Chakra Petch', sans-serif; }
 
-        /* Tactical HUD overlay */
+        /* Tactical HUD overlay styling */
         .hud-line { stroke: #10b981; stroke-width: 1.5; fill: none; }
         .hud-text { font-family: 'JetBrains Mono', monospace; font-size: 11px; fill: #10b981; }
 
-        /* FLIR Thermal Shader Simulation */
+        /* Military Shaders */
         .flir-thermal {
-            filter: contrast(180%) brightness(110%) invert(100%) hue-rotate(180deg) saturate(250%);
+            filter: contrast(190%) brightness(115%) invert(100%) hue-rotate(185deg) saturate(260%);
         }
         .nvg-mode {
-            filter: contrast(160%) brightness(130%) sepia(100%) hue-rotate(75deg) saturate(300%);
+            filter: contrast(170%) brightness(130%) sepia(100%) hue-rotate(75deg) saturate(320%);
+        }
+        .crt-scanlines {
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 3px 100%;
+            pointer-events: none;
         }
 
         /* Virtual Gimbal Stick */
@@ -41,9 +47,9 @@
             width: 110px;
             height: 110px;
             border-radius: 50%;
-            background: rgba(15, 23, 42, 0.7);
-            border: 2px solid rgba(16, 185, 129, 0.4);
-            box-shadow: inset 0 0 15px rgba(16, 185, 129, 0.2);
+            background: rgba(15, 23, 42, 0.75);
+            border: 2px solid rgba(16, 185, 129, 0.5);
+            box-shadow: inset 0 0 15px rgba(16, 185, 129, 0.25);
             position: relative;
             touch-action: none;
         }
@@ -51,61 +57,94 @@
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            background: radial-gradient(circle, #34d399 10%, #059669 80%);
-            box-shadow: 0 0 10px #10b981;
+            background: radial-gradient(circle, #34d399 15%, #059669 85%);
+            box-shadow: 0 0 12px #10b981;
             position: absolute;
             top: 33px;
             left: 33px;
             pointer-events: none;
             transition: transform 0.05s ease-out;
         }
+
+        /* Target Bounding Box */
+        .target-box {
+            position: absolute;
+            border: 2px solid #ef4444;
+            background: rgba(239, 68, 68, 0.12);
+            pointer-events: auto;
+            cursor: crosshair;
+            transition: all 0.1s ease;
+        }
+        .target-box.locked {
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.18);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(3, 7, 18, 0.8); }
+        ::-webkit-scrollbar-thumb { background: #059669; border-radius: 2px; }
     </style>
 </head>
-<body class="w-screen h-screen flex flex-col bg-gray-950 text-gray-100">
+<body class="w-screen h-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
 
-    <!-- Top Tactical Telemetry Header -->
-    <header class="h-12 border-b border-emerald-900/60 bg-gray-950/90 flex items-center justify-between px-3 md:px-5 z-20 shrink-0">
+    <!-- Top Military Tactical GCS Banner -->
+    <header class="h-13 border-b border-emerald-900/60 bg-slate-950/95 flex items-center justify-between px-3 md:px-5 z-30 shrink-0">
         <div class="flex items-center space-x-3 rtl:space-x-reverse">
-            <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-emerald-400">
-                <i class="fa-solid fa-crosshairs text-base"></i>
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-slate-950 shadow-lg shadow-emerald-500/30">
+                <i class="fa-solid fa-crosshairs text-lg"></i>
             </div>
             <div>
                 <div class="flex items-center space-x-2 rtl:space-x-reverse">
-                    <span class="font-chakra font-bold text-base tracking-wider text-emerald-400">APEX<span class="text-white">UAV</span></span>
-                    <span class="px-2 py-0.5 text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60 rounded">MIL-STD-810H</span>
+                    <span class="font-chakra font-bold text-base md:text-lg tracking-wider text-emerald-400">APEX<span class="text-white">UAV</span> <span class="text-xs text-amber-400 font-mono">[DEFENSE EDITION]</span></span>
+                    <span class="hidden md:inline-block px-2 py-0.5 text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60 rounded">STANAG 4586 // MIL-STD-810H</span>
                 </div>
-                <p class="text-[9px] text-gray-400 -mt-1 hidden sm:block" id="subHeaderDesc">Tactical Drone Flight Dynamics, Aerodynamics & Pilot Academy</p>
+                <p class="text-[9px] text-slate-400 -mt-1 hidden sm:block" id="subHeaderDesc">Tactical Unmanned Aerial Systems (UAS) Flight Dynamics, GCS & AI Defense Academy</p>
             </div>
         </div>
 
-        <!-- Telemetry Data Strip -->
-        <div class="flex items-center space-x-4 md:space-x-6 rtl:space-x-reverse text-xs font-mono">
+        <!-- Telemetry Highlights -->
+        <div class="hidden lg:flex items-center space-x-5 rtl:space-x-reverse text-xs font-mono">
+            <div class="flex items-center space-x-1.5 rtl:space-x-reverse">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="text-slate-500 text-[10px]">FLIGHT STATE:</span>
+                <span id="telArmStatus" class="font-bold text-emerald-400">ARMED (GUIDED)</span>
+            </div>
             <div>
-                <span class="text-gray-500 text-[10px]">ALT:</span>
+                <span class="text-slate-500 text-[10px]">ALT:</span>
                 <span id="telAlt" class="font-bold text-emerald-400">42.5 m</span>
             </div>
             <div>
-                <span class="text-gray-500 text-[10px]">SPD:</span>
-                <span id="telSpd" class="font-bold text-cyan-400">18.4 m/s</span>
+                <span class="text-slate-500 text-[10px]">IAS:</span>
+                <span id="telSpd" class="font-bold text-cyan-400">24.2 m/s</span>
             </div>
-            <div class="hidden sm:block">
-                <span class="text-gray-500 text-[10px]">BATT:</span>
+            <div>
+                <span class="text-slate-500 text-[10px]">6S LiPo:</span>
                 <span id="telBatt" class="font-bold text-amber-400">22.8V (86%)</span>
             </div>
-            <div class="hidden md:block">
-                <span class="text-gray-500 text-[10px]">RC LINK:</span>
-                <span id="telRssi" class="font-bold text-emerald-400">-58 dBm (100%)</span>
+            <div>
+                <span class="text-slate-500 text-[10px]">C2 LINK:</span>
+                <span id="telRssi" class="font-bold text-emerald-400">-54 dBm (99%)</span>
+            </div>
+            <div>
+                <span class="text-slate-500 text-[10px]">GPS SAT:</span>
+                <span id="telGps" class="font-bold text-emerald-400">18 3D-FIX</span>
             </div>
         </div>
 
         <!-- Right Quick Controls -->
         <div class="flex items-center space-x-2 rtl:space-x-reverse">
             <!-- Cam Vision Mode -->
-            <button id="camModeBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-gray-900 border border-gray-700 hover:border-emerald-500 text-gray-300 transition" title="Cycle Camera (RGB/FLIR/NVG)">
-                <i class="fa-solid fa-eye mr-1 text-emerald-400"></i><span id="txtCamMode">RGB</span>
+            <button id="camModeBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-300 transition" title="Cycle Vision Sensor (Daylight RGB / FLIR Thermal / Night Vision NVG)">
+                <i class="fa-solid fa-eye mr-1 text-emerald-400"></i><span id="txtCamMode">RGB HD</span>
+            </button>
+            <!-- Electronic Warfare Jamming Simulator -->
+            <button id="jammingBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-rose-950/80 border border-rose-600/60 hover:bg-rose-900 text-rose-300 transition flex items-center space-x-1" title="Inject Electronic Warfare (EW) GPS & C2 Jamming">
+                <i class="fa-solid fa-tower-broadcast"></i><span class="hidden md:inline" id="txtJamming">EW JAMMING</span>
             </button>
             <!-- Audio Toggle -->
-            <button id="soundBtn" class="p-1.5 rounded bg-gray-900 border border-gray-700 hover:border-emerald-500 text-gray-400 hover:text-emerald-400 transition" title="Turbine / Motor Sound">
+            <button id="soundBtn" class="p-1.5 rounded bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-400 hover:text-emerald-400 transition" title="Brushless Motor / Turbofan Acoustics">
                 <i class="fa-solid fa-volume-high" id="soundIcon"></i>
             </button>
             <!-- Language Toggle -->
@@ -115,106 +154,193 @@
         </div>
     </header>
 
-    <!-- Main Simulator Viewport -->
-    <div class="flex-1 relative overflow-hidden bg-black flex">
+    <!-- Main Command & Simulation Workspace -->
+    <div class="flex-1 relative overflow-hidden flex flex-col lg:flex-row">
 
-        <!-- 3D Canvas Container -->
-        <div id="threeContainer" class="w-full h-full relative cursor-crosshair"></div>
+        <!-- Left / Center 3D Viewport with HUD & Targets -->
+        <div class="flex-1 relative h-full w-full bg-slate-950">
+            <!-- 3D Canvas -->
+            <div id="threeContainer" class="w-full h-full relative cursor-crosshair"></div>
+            <div id="crtOverlay" class="absolute inset-0 crt-scanlines"></div>
 
-        <!-- Modern Aircraft Heads-Up Display (HUD) Overlay -->
-        <svg id="hudOverlay" class="absolute inset-0 w-full h-full pointer-events-none z-10">
-            <!-- Center Crosshair & Pitch Ladder -->
-            <g id="hudCenter" transform="translate(0, 0)">
-                <circle cx="0" cy="0" r="16" class="hud-line" stroke-dasharray="4,4"></circle>
-                <line x1="-30" y1="0" x2="-10" y2="0" class="hud-line"></line>
-                <line x1="10" y1="0" x2="30" y2="0" class="hud-line"></line>
-                <line x1="0" y1="-30" x2="0" y2="-10" class="hud-line"></line>
-                <line x1="0" y1="10" x2="0" y2="30" class="hud-line"></line>
-                <!-- Artificial Horizon Line -->
-                <line id="horizonLine" x1="-120" y1="0" x2="120" y2="0" stroke="#10b981" stroke-width="2"></line>
-            </g>
+            <!-- Optical AI Target Bounding Boxes (Dynamic 2D Tracking Projections) -->
+            <div id="targetLayer" class="absolute inset-0 pointer-events-none z-10 overflow-hidden">
+                <!-- Target 1: Armored Vehicle -->
+                <div id="tbox1" class="target-box rounded" style="top: 35%; left: 45%; width: 75px; height: 50px;">
+                    <div class="absolute -top-5 left-0 text-[9px] font-mono font-bold bg-slate-950/90 text-emerald-400 px-1 border border-emerald-700/60 whitespace-nowrap">
+                        [TGT-01] ARMORED 98.4%
+                    </div>
+                    <div class="absolute -bottom-4 right-0 text-[8px] font-mono text-slate-400">
+                        RNG: 420m
+                    </div>
+                </div>
 
-            <!-- Airspeed Tape (Left) -->
-            <rect x="25" y="120" width="45" height="180" fill="rgba(6, 78, 59, 0.3)" stroke="#10b981" stroke-width="1" rx="4"></rect>
-            <text x="47" y="140" text-anchor="middle" class="hud-text" font-weight="bold">IAS</text>
-            <text id="hudAirspeedText" x="47" y="215" text-anchor="middle" class="hud-text" font-size="16" font-weight="bold" fill="#34d399">18</text>
-            <text x="47" y="235" text-anchor="middle" class="hud-text" font-size="9">M/S</text>
+                <!-- Target 2: Radar Mast -->
+                <div id="tbox2" class="target-box rounded" style="top: 48%; left: 62%; width: 60px; height: 75px;">
+                    <div class="absolute -top-5 left-0 text-[9px] font-mono font-bold bg-slate-950/90 text-rose-400 px-1 border border-rose-700/60 whitespace-nowrap">
+                        [TGT-02] RADAR MAST 99.1%
+                    </div>
+                    <div class="absolute -bottom-4 right-0 text-[8px] font-mono text-slate-400">
+                        RNG: 680m
+                    </div>
+                </div>
+            </div>
 
-            <!-- Barometric Altitude Tape (Right) -->
-            <g id="altTapeGroup" transform="translate(0, 0)">
-                <rect id="altRect" x="0" y="120" width="45" height="180" fill="rgba(6, 78, 59, 0.3)" stroke="#10b981" stroke-width="1" rx="4"></rect>
-                <text id="altLabel" x="0" y="140" text-anchor="middle" class="hud-text" font-weight="bold">ALT</text>
-                <text id="hudAltText" x="0" y="215" text-anchor="middle" class="hud-text" font-size="16" font-weight="bold" fill="#34d399">42</text>
-                <text id="altUnits" x="0" y="235" text-anchor="middle" class="hud-text" font-size="9">M</text>
-            </g>
+            <!-- Modern Military Heads-Up Display (HUD) Overlay -->
+            <svg id="hudOverlay" class="absolute inset-0 w-full h-full pointer-events-none z-10">
+                <!-- Center Reticle & Pitch Ladder -->
+                <g id="hudCenter" transform="translate(0, 0)">
+                    <circle cx="0" cy="0" r="22" class="hud-line" stroke-dasharray="6,4"></circle>
+                    <line x1="-35" y1="0" x2="-10" y2="0" class="hud-line"></line>
+                    <line x1="10" y1="0" x2="35" y2="0" class="hud-line"></line>
+                    <line x1="0" y1="-35" x2="0" y2="-10" class="hud-line"></line>
+                    <line x1="0" y1="10" x2="0" y2="35" class="hud-line"></line>
+                    <!-- Laser Rangefinder Pip -->
+                    <circle cx="0" cy="0" r="3" fill="#ef4444"></circle>
+                    <!-- Artificial Horizon Line -->
+                    <line id="horizonLine" x1="-140" y1="0" x2="140" y2="0" stroke="#10b981" stroke-width="2"></line>
+                </g>
 
-            <!-- Compass Heading Tape (Top Center) -->
-            <rect x="0" y="15" width="220" height="28" fill="rgba(6, 78, 59, 0.3)" stroke="#10b981" stroke-width="1" rx="4" id="compassRect"></rect>
-            <text id="compassText" x="0" y="34" text-anchor="middle" class="hud-text" font-size="14" font-weight="bold" fill="#34d399">HDG: 045° [NE]</text>
-        </svg>
+                <!-- Airspeed Tape (Left) -->
+                <rect x="25" y="110" width="48" height="190" fill="rgba(6, 78, 59, 0.35)" stroke="#10b981" stroke-width="1.2" rx="4"></rect>
+                <text x="49" y="130" text-anchor="middle" class="hud-text" font-weight="bold">IAS</text>
+                <text id="hudAirspeedText" x="49" y="210" text-anchor="middle" class="hud-text" font-size="18" font-weight="bold" fill="#34d399">24</text>
+                <text x="49" y="235" text-anchor="middle" class="hud-text" font-size="9">M/S</text>
 
-        <!-- Drone Class Floating Selector (Top Left) -->
-        <div class="absolute top-4 left-4 z-20 flex space-x-1.5 rtl:space-x-reverse bg-gray-950/80 p-1.5 rounded-xl border border-emerald-800/60 backdrop-blur-md">
-            <button id="droneQuadBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white shadow-md shadow-emerald-600/30 flex items-center space-x-1.5">
-                <i class="fa-solid fa-drone"></i>
-                <span id="txtQuad">Heavy Quadcopter</span>
-            </button>
-            <button id="droneFixedBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-emerald-300 flex items-center space-x-1.5">
-                <i class="fa-solid fa-plane"></i>
-                <span id="txtFixed">Fixed-Wing UAV</span>
-            </button>
-            <button id="droneFpvBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-emerald-300 flex items-center space-x-1.5">
-                <i class="fa-solid fa-bolt"></i>
-                <span id="txtFpv">Acro FPV Interceptor</span>
-            </button>
+                <!-- Barometric Altitude Tape (Right) -->
+                <g id="altTapeGroup" transform="translate(0, 0)">
+                    <rect id="altRect" x="0" y="110" width="48" height="190" fill="rgba(6, 78, 59, 0.35)" stroke="#10b981" stroke-width="1.2" rx="4"></rect>
+                    <text id="altLabel" x="0" y="130" text-anchor="middle" class="hud-text" font-weight="bold">ALT</text>
+                    <text id="hudAltText" x="0" y="210" text-anchor="middle" class="hud-text" font-size="18" font-weight="bold" fill="#34d399">42</text>
+                    <text id="altUnits" x="0" y="235" text-anchor="middle" class="hud-text" font-size="9">MSL</text>
+                </g>
+
+                <!-- Compass Heading Tape (Top Center) -->
+                <rect x="0" y="15" width="240" height="30" fill="rgba(6, 78, 59, 0.35)" stroke="#10b981" stroke-width="1.2" rx="4" id="compassRect"></rect>
+                <text id="compassText" x="0" y="35" text-anchor="middle" class="hud-text" font-size="14" font-weight="bold" fill="#34d399">HDG: 045° [NE]</text>
+            </svg>
+
+            <!-- Drone Category Tactical Selector (Top Left) -->
+            <div class="absolute top-4 left-4 z-20 flex space-x-1.5 rtl:space-x-reverse bg-slate-950/85 p-1.5 rounded-xl border border-emerald-800/60 backdrop-blur-md">
+                <button id="droneFixedBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white shadow-md shadow-emerald-600/30 flex items-center space-x-1.5">
+                    <i class="fa-solid fa-plane"></i>
+                    <span id="txtFixed">Saqr-1 MALE Long-Endurance</span>
+                </button>
+                <button id="droneQuadBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5">
+                    <i class="fa-solid fa-drone"></i>
+                    <span id="txtQuad">Tactical VTOL Hexacopter</span>
+                </button>
+                <button id="droneFpvBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5">
+                    <i class="fa-solid fa-bolt"></i>
+                    <span id="txtFpv">FPV Kamikaze Interceptor</span>
+                </button>
+            </div>
+
+            <!-- Virtual RC Dual Gimbals (Tactile Mobile & Desktop Controls) -->
+            <div class="absolute bottom-5 inset-x-4 z-20 flex justify-between pointer-events-none">
+                <!-- Left Stick: Throttle & Yaw -->
+                <div class="pointer-events-auto flex flex-col items-center">
+                    <div class="gimbal-base" id="leftGimbal">
+                        <div class="gimbal-knob" id="leftKnob"></div>
+                    </div>
+                    <div class="text-[10px] text-emerald-400 font-mono mt-1 font-bold" id="leftStickLabel">THROTTLE / YAW</div>
+                </div>
+
+                <!-- Tactical Flight Action Buttons -->
+                <div class="pointer-events-auto self-end flex space-x-2 rtl:space-x-reverse bg-slate-950/85 px-3 py-2 rounded-xl border border-emerald-800/60 backdrop-blur-md">
+                    <button id="armBtn" class="px-3 py-1.5 text-xs font-bold rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-900 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-power-off"></i>
+                        <span id="txtArm">ARM MOTORS</span>
+                    </button>
+                    <button id="autoHoverBtn" class="px-3 py-1.5 text-xs font-bold rounded bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-300 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-anchor"></i>
+                        <span id="txtAutoHover">LOITER ORBIT</span>
+                    </button>
+                    <button id="rthBtn" class="px-3 py-1.5 text-xs font-bold rounded bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-300 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-house-chimney"></i>
+                        <span id="txtRTH">RTL FAILSAFE</span>
+                    </button>
+                    <button id="laserDesignatorBtn" class="px-3 py-1.5 text-xs font-bold rounded bg-rose-950 border border-rose-600/50 text-rose-300 hover:bg-rose-900 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-bullseye"></i>
+                        <span id="txtDesignate">LOCK TARGET</span>
+                    </button>
+                </div>
+
+                <!-- Right Stick: Pitch & Roll -->
+                <div class="pointer-events-auto flex flex-col items-center">
+                    <div class="gimbal-base" id="rightGimbal">
+                        <div class="gimbal-knob" id="rightKnob"></div>
+                    </div>
+                    <div class="text-[10px] text-emerald-400 font-mono mt-1 font-bold" id="rightStickLabel">PITCH / ROLL</div>
+                </div>
+            </div>
         </div>
 
-        <!-- Mission Academy Floating Deck (Top Right) -->
-        <div class="absolute top-4 right-4 z-20 bg-gray-950/85 p-2.5 rounded-xl border border-emerald-800/60 backdrop-blur-md max-w-xs hidden sm:block">
-            <div class="flex items-center justify-between text-xs font-bold text-emerald-400 mb-1.5">
-                <span id="txtAcademyTitle"><i class="fa-solid fa-graduation-cap mr-1"></i> PILOT ACADEMY</span>
-                <span id="missionBadge" class="text-[9px] bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-1.5 py-0.5 rounded">MISSION 1</span>
-            </div>
-            <div id="missionDesc" class="text-[11px] text-gray-300 leading-snug">
-                Fly through the highlighted green aerial waypoints to earn Flight Certifications.
-            </div>
-            <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-800 text-[10px]">
-                <span class="text-gray-400" id="scoreLabel">Waypoints Cleared:</span>
-                <span id="gateScore" class="font-bold text-emerald-400 font-mono">0 / 6</span>
-            </div>
-        </div>
+        <!-- Right Tactical GCS Side Console (STANAG 4586 Command Deck) -->
+        <div class="w-full lg:w-96 bg-slate-950/95 border-t lg:border-t-0 lg:border-l border-emerald-900/60 flex flex-col h-auto lg:h-full overflow-y-auto p-3.5 space-y-3.5 shrink-0 z-20">
 
-        <!-- Virtual RC Dual Gimbals (Tactile Mobile & Desktop Controls) -->
-        <div class="absolute bottom-5 inset-x-4 z-20 flex justify-between pointer-events-none">
-            <!-- Left Gimbal: Throttle & Yaw -->
-            <div class="pointer-events-auto flex flex-col items-center">
-                <div class="gimbal-base" id="leftGimbal">
-                    <div class="gimbal-knob" id="leftKnob"></div>
+            <!-- Military Tactical Map (MGRS Military Grid Reference System) -->
+            <div class="bg-slate-900/90 rounded-xl p-3 border border-slate-800">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold text-emerald-400 flex items-center">
+                        <i class="fa-solid fa-map-location-dot mr-1.5 text-emerald-400"></i>
+                        <span id="mapTitle">MGRS TACTICAL AIRSPACE MAP</span>
+                    </span>
+                    <span class="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-700/50">ZONE 38Q // SAUDI AIRSPACE</span>
                 </div>
-                <div class="text-[10px] text-emerald-400 font-mono mt-1 font-bold" id="leftStickLabel">THROTTLE / YAW</div>
-            </div>
-
-            <!-- Central Flight Mode & Autopilot -->
-            <div class="pointer-events-auto self-end flex space-x-2 rtl:space-x-reverse bg-gray-950/80 px-3 py-2 rounded-xl border border-emerald-800/50 backdrop-blur-md">
-                <button id="autoHoverBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-900 transition flex items-center space-x-1">
-                    <i class="fa-solid fa-anchor"></i>
-                    <span id="txtAutoHover">AUTO-HOVER</span>
-                </button>
-                <button id="rthBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-gray-900 border border-gray-700 hover:border-emerald-500 text-gray-300 transition flex items-center space-x-1">
-                    <i class="fa-solid fa-house-chimney"></i>
-                    <span id="txtRTH">RETURN HOME</span>
-                </button>
-                <button id="resetFlightBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-gray-900 border border-gray-700 hover:border-emerald-500 text-gray-300 transition" title="Reset Drone Position">
-                    <i class="fa-solid fa-rotate-left"></i>
-                </button>
-            </div>
-
-            <!-- Right Gimbal: Pitch & Roll -->
-            <div class="pointer-events-auto flex flex-col items-center">
-                <div class="gimbal-base" id="rightGimbal">
-                    <div class="gimbal-knob" id="rightKnob"></div>
+                <div class="relative w-full h-36 bg-black rounded border border-slate-800 overflow-hidden">
+                    <canvas id="tacMapCanvas" width="350" height="144" class="w-full h-full"></canvas>
+                    <!-- Compass Rose in corner -->
+                    <div class="absolute top-1 right-1 text-[9px] text-emerald-500 font-mono font-bold bg-slate-950/80 px-1 rounded">
+                        N ↑
+                    </div>
                 </div>
-                <div class="text-[10px] text-emerald-400 font-mono mt-1 font-bold" id="rightStickLabel">PITCH / ROLL</div>
+                <div class="flex justify-between items-center text-[10px] text-slate-400 mt-1.5 font-mono">
+                    <span>MGRS: <span id="mgrsCoord" class="text-emerald-300 font-bold">38Q KM 1452 8931</span></span>
+                    <span>WPT: <span id="activeWptText" class="text-cyan-400 font-bold">WPT-03 (RECON)</span></span>
+                </div>
+            </div>
+
+            <!-- Pilot Certification Academy & Missions -->
+            <div class="bg-slate-900/90 rounded-xl p-3 border border-slate-800">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold text-emerald-400 flex items-center">
+                        <i class="fa-solid fa-graduation-cap mr-1.5 text-emerald-400"></i>
+                        <span id="txtAcademyTitle">PILOT DEFENSE ACADEMY</span>
+                    </span>
+                    <span id="missionBadge" class="text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-2 py-0.5 rounded">QUAL-01: ISR PATROL</span>
+                </div>
+                <p id="missionDesc" class="text-[11px] text-slate-300 leading-snug">
+                    Navigate through 6 aerial reconnaissance corridors while maintaining laser lock on moving tactical targets without radar detection.
+                </p>
+                <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-800 text-[10px]">
+                    <span class="text-slate-400" id="scoreLabel">Recon Waypoints Cleared:</span>
+                    <span id="gateScore" class="font-bold text-emerald-400 font-mono text-xs">0 / 6 COMPLETED</span>
+                </div>
+            </div>
+
+            <!-- Real-Time MAVLink Telemetry Stream -->
+            <div class="bg-slate-900/90 rounded-xl p-3 border border-slate-800 flex-1 flex flex-col min-h-[160px]">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold text-emerald-400 flex items-center">
+                        <i class="fa-solid fa-terminal mr-1.5 text-emerald-400"></i>
+                        <span id="mavlinkTitle">MAVLink v2 TELEMETRY STREAM</span>
+                    </span>
+                    <span class="text-[9px] font-mono text-cyan-400 bg-cyan-950/80 px-1.5 py-0.5 rounded">PORT: UDP 14550</span>
+                </div>
+                <div id="mavlinkLog" class="flex-1 overflow-y-auto space-y-1 text-[10px] font-mono pr-1 text-slate-300 bg-black/60 p-2 rounded border border-slate-800">
+                    <div class="text-emerald-400">[MAV] HEARTBEAT: Autopilot PX4 v1.14.0 | Armed: TRUE | Mode: GUIDED</div>
+                    <div class="text-slate-400">[MAV] SYS_STATUS: Battery 22.84V | Current 34.2A | CPU Load 18%</div>
+                    <div class="text-cyan-400">[MAV] GPS_RAW_INT: Lat 24.7136° | Lon 46.6753° | FixType 3D_RTK</div>
+                    <div class="text-slate-400">[MAV] ATTITUDE: Roll -0.012 rad | Pitch 0.045 rad | Yaw 0.785 rad</div>
+                    <div class="text-amber-400">[MAV] EKF3_STATUS: IMU Fusion 100% | Optical Flow Active</div>
+                </div>
+            </div>
+
+            <!-- Defense Standards Stamp -->
+            <div class="pt-2 border-t border-slate-800 text-[10px] text-slate-500 flex justify-between items-center">
+                <span>Eng. Tareq Aboushi</span>
+                <span class="text-emerald-500 font-mono">UAV Systems & Avionics</span>
             </div>
         </div>
 
@@ -225,34 +351,46 @@
         // Bilingual Dictionary
         const I18N = {
             en: {
-                subDesc: "Tactical Drone Flight Dynamics, Aerodynamics & Pilot Academy",
-                quad: "Heavy Quadcopter",
-                fixed: "Fixed-Wing UAV",
-                fpv: "Acro FPV Interceptor",
-                academy: "PILOT ACADEMY",
-                mission1: "Fly through the highlighted green aerial waypoints to earn Flight Certifications.",
-                mission2: "Maintain stable altitude below 30m and inspect high-voltage transmission pylons.",
-                mission3: "Search and rescue thermal scan in foggy mountain terrain.",
-                hover: "AUTO-HOVER",
-                rth: "RETURN HOME",
+                subDesc: "Tactical Unmanned Aerial Systems (UAS) Flight Dynamics, GCS & AI Defense Academy",
+                fixed: "Saqr-1 MALE Long-Endurance",
+                quad: "Tactical VTOL Hexacopter",
+                fpv: "FPV Kamikaze Interceptor",
+                academy: "PILOT DEFENSE ACADEMY",
+                mission1: "Navigate through 6 aerial reconnaissance corridors while maintaining laser lock on moving tactical targets without radar detection.",
+                arm: "ARM MOTORS",
+                disarm: "DISARM MOTORS",
+                hover: "LOITER ORBIT",
+                rth: "RTL FAILSAFE",
+                designate: "LOCK TARGET",
+                designated: "TARGET LOCKED",
                 throttleYaw: "THROTTLE / YAW",
                 pitchRoll: "PITCH / ROLL",
-                scoreText: "Waypoints Cleared:"
+                scoreText: "Recon Waypoints Cleared:",
+                mapTitle: "MGRS TACTICAL AIRSPACE MAP",
+                mavlinkTitle: "MAVLink v2 TELEMETRY STREAM",
+                jamming: "EW JAMMING",
+                jammingActive: "EW JAMMED (EKF ACTIVE)"
             },
             ar: {
-                subDesc: "ديناميكا طيران الطائرات المسيرة، الديناميكا الهوائية وأكاديمية تدريب الطيارين",
-                quad: "كوادكوبتر صناعية ثقيلة",
-                fixed: "مسيرة الأجنحة الثابتة",
-                fpv: "مسيرة الاعتراض السريع (FPV)",
-                academy: "أكاديمية تدريب الطيارين",
-                mission1: "حلق عبر بوابات الملاحة الجوية الخضراء لاجتياز رخصة الطيران المعتمدة.",
-                mission2: "حافظ على ارتفاع ثابت أقل من 30 متراً وافحص أبراج نقل الطاقة الكهربائية.",
-                mission3: "مسح حراري تكتيكي في التضاريس الجبلية الوعرة لعمليات الإنقاذ.",
-                hover: "التثبيت التلقائي",
-                rth: "العودة لقاعدة الإقلاع",
+                subDesc: "ديناميكا طيران الطائرات المسيرة التكتيكية، محطة التحكم الأرضية وأكاديمية الدفاع الجوي",
+                fixed: "مسيرة صقر-1 الاستراتيجية للمدى البعيد",
+                quad: "مسيرة إقلاع عمودي تكتيكية (VTOL)",
+                fpv: "مسيرة انتحارية اعتراضية نقطية (FPV)",
+                academy: "أكاديمية تدريب طياري المسيرات الدفاعية",
+                mission1: "حلق عبر 6 ممرات استطلاع جوي تكتيكية مع تثبيت القفل الليزري على الأهداف المتحركة وتفادي الرادارات الأرضية.",
+                arm: "تشغيل المحركات",
+                disarm: "إيقاف المحركات",
+                hover: "دوران استطلاعي",
+                rth: "العودة التلقائية لقاعدة الإقلاع",
+                designate: "قفل الهدف ليزرياً",
+                designated: "تم قفل الهدف",
                 throttleYaw: "قوة الدفع / الانعراج",
                 pitchRoll: "الميلان / الانحدار",
-                scoreText: "البوابات المنجزة:"
+                scoreText: "بوابات الاستطلاع المنجزة:",
+                mapTitle: "خريطة العمليات الجوية التكتيكية (MGRS)",
+                mavlinkTitle: "بث بروتوكول القياس عن بعد MAVLink",
+                jamming: "تشويش إلكتروني",
+                jammingActive: "تشويش نشط (تفعيل ملاحة القصور الذاتي)"
             }
         };
 
@@ -269,7 +407,7 @@
                 motorOsc = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
                 motorOsc.type = 'sawtooth';
-                motorOsc.frequency.setValueAtTime(220, audioCtx.currentTime);
+                motorOsc.frequency.setValueAtTime(240, audioCtx.currentTime);
                 gain.gain.setValueAtTime(0.02, audioCtx.currentTime);
                 motorOsc.connect(gain);
                 gain.connect(audioCtx.destination);
@@ -279,35 +417,44 @@
 
         function updateMotorAudio(throttle) {
             if (isAudioMuted || !motorOsc || !audioCtx) return;
-            const targetFreq = 180 + throttle * 450;
+            const targetFreq = 160 + throttle * 520;
             motorOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
         }
 
-        // Three.js Flight World & Models
+        // Three.js Tactical Military World & Assets
         let scene, camera, renderer;
         let droneRoot, droneBody, rotors = [];
         let waypoints = [], activeWaypointIndex = 0;
-        let droneType = 'quad'; // quad, fixed, fpv
+        let droneType = 'fixed'; // fixed, quad, fpv
+        let isArmed = true;
         let autoHover = true;
+        let isJamming = false;
+        let isTargetLocked = false;
 
-        // Drone Physics States
+        // Drone Physics States (6-DoF Rigid Body)
         const state = {
-            pos: new THREE.Vector3(0, 15, 0),
+            pos: new THREE.Vector3(0, 35, 0),
             vel: new THREE.Vector3(0, 0, 0),
             rot: new THREE.Euler(0, 0, 0, 'YXZ'),
-            throttle: 0.5,
+            throttle: 0.6,
             yawInput: 0,
             pitchInput: 0,
             rollInput: 0
         };
 
+        // Ground Target Positions (Tactical Simulation)
+        const targets = [
+            { pos: new THREE.Vector3(45, 0, 120), label: "ARMORED TANK", boxId: "tbox1" },
+            { pos: new THREE.Vector3(-90, 0, 240), label: "RADAR MAST", boxId: "tbox2" }
+        ];
+
         function initThree() {
             const container = document.getElementById('threeContainer');
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x060d17);
-            scene.fog = new THREE.FogExp2(0x060d17, 0.008);
+            scene.background = new THREE.Color(0x020617);
+            scene.fog = new THREE.FogExp2(0x020617, 0.005);
 
-            camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 2000);
+            camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 3000);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(container.clientWidth, container.clientHeight);
@@ -315,23 +462,23 @@
             renderer.shadowMap.enabled = true;
             container.appendChild(renderer.domElement);
 
-            // Lighting
-            const ambient = new THREE.AmbientLight(0x38bdf8, 0.5);
+            // Military Lighting (Late afternoon desert ambient)
+            const ambient = new THREE.AmbientLight(0x38bdf8, 0.45);
             scene.add(ambient);
-            const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-            sun.position.set(50, 100, 30);
+            const sun = new THREE.DirectionalLight(0xfef08a, 1.4);
+            sun.position.set(120, 200, 80);
             sun.castShadow = true;
             scene.add(sun);
 
-            // Ground Terrain & Runway
-            buildTerrain();
+            // Ground Tactical Terrain & Base
+            buildMilitaryBase();
 
             // Drone Root
             droneRoot = new THREE.Group();
             scene.add(droneRoot);
             buildDroneModel();
 
-            // Waypoints Obstacle Course
+            // Recon Corridor Waypoints
             buildWaypointCourse();
 
             window.addEventListener('resize', onResize);
@@ -339,130 +486,187 @@
             animate();
         }
 
-        function buildTerrain() {
-            // Ground Plane with Grid
-            const groundGeo = new THREE.PlaneGeometry(1200, 1200, 32, 32);
-            const groundMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
+        // Tactical Military Base & Mountain Outposts
+        function buildMilitaryBase() {
+            // Desert Ground Plane with Tactical Grid
+            const groundGeo = new THREE.PlaneGeometry(2400, 2400, 32, 32);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 0.9 });
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.position.y = 0;
             scene.add(ground);
 
-            const grid = new THREE.GridHelper(1200, 120, 0x10b981, 0x1e293b);
+            const grid = new THREE.GridHelper(2400, 160, 0x10b981, 0x0f172a);
             scene.add(grid);
 
-            // Runway
-            const runwayGeo = new THREE.PlaneGeometry(30, 300);
-            const runwayMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
+            // Military Airbase Runway
+            const runwayGeo = new THREE.PlaneGeometry(45, 600);
+            const runwayMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.6 });
             const runway = new THREE.Mesh(runwayGeo, runwayMat);
             runway.rotation.x = -Math.PI / 2;
-            runway.position.set(0, 0.05, 0);
+            runway.position.set(0, 0.08, 0);
             scene.add(runway);
 
-            // High-voltage transmission towers for inspection mission
-            const towerMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8 });
-            for (let z = -200; z <= 200; z += 100) {
-                const tower = new THREE.Mesh(new THREE.CylinderGeometry(1, 3, 40, 4), towerMat);
-                tower.position.set(60, 20, z);
-                scene.add(tower);
-            }
+            // Target 1: Armored Vehicle 3D Mesh
+            const tankGroup = new THREE.Group();
+            tankGroup.position.copy(targets[0].pos);
+            const tankBody = new THREE.Mesh(new THREE.BoxGeometry(6, 2.5, 9), new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.7 }));
+            tankBody.position.y = 1.25;
+            tankGroup.add(tankBody);
+            const turret = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 2.2, 1.5, 12), new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8 }));
+            turret.position.y = 2.8;
+            tankGroup.add(turret);
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 6, 8), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.set(0, 2.8, 3.5);
+            tankGroup.add(barrel);
+            scene.add(tankGroup);
+
+            // Target 2: Radar Mast 3D Mesh
+            const radarGroup = new THREE.Group();
+            radarGroup.position.copy(targets[1].pos);
+            const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 2.5, 35, 4), new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.9 }));
+            mast.position.y = 17.5;
+            radarGroup.add(mast);
+            const dish = new THREE.Mesh(new THREE.BoxGeometry(10, 3, 0.5), new THREE.MeshStandardMaterial({ color: 0x10b981, wireframe: true }));
+            dish.position.y = 35;
+            radarGroup.add(dish);
+            scene.add(radarGroup);
         }
 
+        // Build 3 Specialized Military UAS Airframes
         function buildDroneModel() {
-            // Clear existing
             while (droneRoot.children.length > 0) {
                 droneRoot.remove(droneRoot.children[0]);
             }
             rotors = [];
 
-            if (droneType === 'quad' || droneType === 'fpv') {
-                // Carbon fiber frame
-                const frameMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.3, metalness: 0.8 });
-                const armMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.9 });
-                const propMat = new THREE.MeshStandardMaterial({ color: droneType === 'fpv' ? 0xef4444 : 0x10b981, transparent: true, opacity: 0.7 });
+            if (droneType === 'fixed') {
+                // Saqr-1 MALE Long-Endurance Reconnaissance UAV
+                const fuselageMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.7 });
+                const wingMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4 });
+                const carbonMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8 });
 
-                // Center Fuselage
-                const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.4, 2.2), frameMat);
-                droneRoot.add(body);
-
-                // Gimbal Camera Pod
-                const camPod = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), new THREE.MeshStandardMaterial({ color: 0x06b6d4, emissive: 0x0891b2 }));
-                camPod.position.set(0, -0.2, 1.0);
-                droneRoot.add(camPod);
-
-                // 4 Arms & Rotors (X-Configuration)
-                const armPositions = [
-                    { x: 1.5, z: 1.5 },
-                    { x: -1.5, z: 1.5 },
-                    { x: 1.5, z: -1.5 },
-                    { x: -1.5, z: -1.5 }
-                ];
-
-                armPositions.forEach(pos => {
-                    // Arm
-                    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.2), armMat);
-                    arm.rotation.z = Math.PI / 2;
-                    arm.position.set(pos.x / 2, 0, pos.z / 2);
-                    droneRoot.add(arm);
-
-                    // Motor Bell
-                    const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.3, 12), armMat);
-                    motor.position.set(pos.x, 0.15, pos.z);
-                    droneRoot.add(motor);
-
-                    // Propeller
-                    const prop = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.02, 0.15), propMat);
-                    prop.position.set(pos.x, 0.32, pos.z);
-                    droneRoot.add(prop);
-                    rotors.push(prop);
-                });
-            } else if (droneType === 'fixed') {
-                // Fixed Wing UAV Fuselage
-                const fuselageMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.4, metalness: 0.6 });
-                const wingMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4 });
-
-                const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.3, 5, 16), fuselageMat);
+                // Streamlined Composite Fuselage
+                const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.35, 6.5, 16), fuselageMat);
                 fuselage.rotation.x = Math.PI / 2;
                 droneRoot.add(fuselage);
 
-                // Main Wing
-                const wing = new THREE.Mesh(new THREE.BoxGeometry(8, 0.08, 1.2), wingMat);
-                wing.position.set(0, 0.1, 0.2);
+                // Bulbous Satellite Communication (SATCOM) Nose Fairing
+                const satcomNose = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 16), fuselageMat);
+                satcomNose.position.set(0, 0.25, 2.4);
+                droneRoot.add(satcomNose);
+
+                // High-Aspect-Ratio Reconnaissance Main Wings (12m Wingspan scale)
+                const wing = new THREE.Mesh(new THREE.BoxGeometry(12, 0.1, 1.4), wingMat);
+                wing.position.set(0, 0.15, 0.4);
                 droneRoot.add(wing);
 
-                // V-Tail
-                const tailLeft = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.05, 0.6), wingMat);
-                tailLeft.rotation.z = Math.PI / 4;
-                tailLeft.position.set(0.6, 0.6, -2.2);
-                const tailRight = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.05, 0.6), wingMat);
-                tailRight.rotation.z = -Math.PI / 4;
-                tailRight.position.set(-0.6, 0.6, -2.2);
+                // Inverted V-Tail Empennage
+                const tailLeft = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.06, 0.8), wingMat);
+                tailLeft.rotation.z = Math.PI / 3.5;
+                tailLeft.position.set(0.9, 0.8, -2.8);
+                const tailRight = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.06, 0.8), wingMat);
+                tailRight.rotation.z = -Math.PI / 3.5;
+                tailRight.position.set(-0.9, 0.8, -2.8);
                 droneRoot.add(tailLeft);
                 droneRoot.add(tailRight);
 
-                // Pusher Propeller
-                const pusherProp = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.02, 0.12), new THREE.MeshBasicMaterial({ color: 0x10b981 }));
-                pusherProp.position.set(0, 0, -2.6);
-                droneRoot.add(pusherProp);
-                rotors.push(pusherProp);
+                // EO/IR Gimbal Pod (Camera Turret under nose)
+                const gimbalPod = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 16), new THREE.MeshStandardMaterial({ color: 0x06b6d4, emissive: 0x0891b2 }));
+                gimbalPod.position.set(0, -0.4, 2.2);
+                droneRoot.add(gimbalPod);
+
+                // Rear Pusher Propeller
+                const prop = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.02, 0.15), new THREE.MeshBasicMaterial({ color: 0x10b981 }));
+                prop.position.set(0, 0, -3.3);
+                droneRoot.add(prop);
+                rotors.push(prop);
+
+            } else if (droneType === 'quad') {
+                // Tactical VTOL Hexacopter
+                const frameMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.3, metalness: 0.9 });
+                const armMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8 });
+                const propMat = new THREE.MeshStandardMaterial({ color: 0x10b981, transparent: true, opacity: 0.75 });
+
+                const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.5, 2.8), frameMat);
+                droneRoot.add(body);
+
+                // 6 Radial Carbon Arms (Hexacopter)
+                for (let i = 0; i < 6; i++) {
+                    const angle = (i / 6) * Math.PI * 2;
+                    const r = 2.4;
+                    const x = Math.cos(angle) * r;
+                    const z = Math.sin(angle) * r;
+
+                    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, r), armMat);
+                    arm.rotation.z = Math.PI / 2;
+                    arm.rotation.y = -angle;
+                    arm.position.set(x / 2, 0, z / 2);
+                    droneRoot.add(arm);
+
+                    const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.35, 12), armMat);
+                    motor.position.set(x, 0.2, z);
+                    droneRoot.add(motor);
+
+                    const prop = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.02, 0.15), propMat);
+                    prop.position.set(x, 0.38, z);
+                    droneRoot.add(prop);
+                    rotors.push(prop);
+                }
+
+                // Center EO/IR Gimbal
+                const cam = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 16), new THREE.MeshStandardMaterial({ color: 0x06b6d4, emissive: 0x0284c7 }));
+                cam.position.set(0, -0.35, 1.2);
+                droneRoot.add(cam);
+
+            } else if (droneType === 'fpv') {
+                // FPV Kamikaze Interceptor (Ultra-agile 8:1 Thrust-to-weight)
+                const frameMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.2 });
+                const propMat = new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.8 });
+
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 1.4), frameMat);
+                droneRoot.add(frame);
+
+                // Warhead Payload on nose
+                const warhead = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 16), new THREE.MeshStandardMaterial({ color: 0xef4444, metalness: 0.8 }));
+                warhead.rotation.x = Math.PI / 2;
+                warhead.position.set(0, 0, 1.0);
+                droneRoot.add(warhead);
+
+                // 4 High-KV Motors
+                const arms = [
+                    { x: 1.2, z: 1.2 }, { x: -1.2, z: 1.2 },
+                    { x: 1.2, z: -1.2 }, { x: -1.2, z: -1.2 }
+                ];
+                arms.forEach(pos => {
+                    const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.25, 12), frameMat);
+                    motor.position.set(pos.x, 0.15, pos.z);
+                    droneRoot.add(motor);
+
+                    const prop = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.02, 0.12), propMat);
+                    prop.position.set(pos.x, 0.3, pos.z);
+                    droneRoot.add(prop);
+                    rotors.push(prop);
+                });
             }
         }
 
-        // Aerial Waypoints Gates
+        // Recon Corridor Waypoints Course
         function buildWaypointCourse() {
             const waypointsCoords = [
-                { x: 0, y: 15, z: 50 },
-                { x: 30, y: 22, z: 120 },
-                { x: -40, y: 30, z: 180 },
-                { x: -60, y: 25, z: 80 },
-                { x: 0, y: 20, z: -50 },
-                { x: 0, y: 10, z: 0 }
+                { x: 0, y: 35, z: 80 },
+                { x: 50, y: 45, z: 180 },
+                { x: -70, y: 55, z: 280 },
+                { x: -120, y: 40, z: 150 },
+                { x: 0, y: 35, z: -80 },
+                { x: 0, y: 20, z: 0 }
             ];
 
-            const ringGeo = new THREE.TorusGeometry(5, 0.25, 8, 32);
+            const ringGeo = new THREE.TorusGeometry(7, 0.35, 8, 32);
             const ringMat = new THREE.MeshBasicMaterial({ color: 0x10b981, wireframe: true });
 
-            waypointsCoords.forEach((coord, idx) => {
+            waypointsCoords.forEach(coord => {
                 const ring = new THREE.Mesh(ringGeo, ringMat.clone());
                 ring.position.set(coord.x, coord.y, coord.z);
                 scene.add(ring);
@@ -470,7 +674,7 @@
             });
         }
 
-        // On-screen Virtual Gimbal Logic
+        // Tactile GCS Virtual Gimbal Logic
         function setupGimbal(baseId, knobId, onMove) {
             const base = document.getElementById(baseId);
             const knob = document.getElementById(knobId);
@@ -516,22 +720,21 @@
             window.addEventListener('touchend', handleEnd);
         }
 
-        // Left Gimbal: X = Yaw, Y = Throttle
+        // Left Gimbal: Mode 2 (Throttle Y, Yaw X)
         setupGimbal('leftGimbal', 'leftKnob', (normX, normY) => {
             state.yawInput = normX;
-            // Throttle: up is negative normY
             state.throttle = 0.5 - normY * 0.5;
             autoHover = false;
         });
 
-        // Right Gimbal: X = Roll, Y = Pitch
+        // Right Gimbal: Mode 2 (Pitch Y, Roll X)
         setupGimbal('rightGimbal', 'rightKnob', (normX, normY) => {
             state.rollInput = normX;
             state.pitchInput = -normY;
             autoHover = false;
         });
 
-        // Keyboard Controls
+        // Keyboard Navigation
         const keys = {};
         window.addEventListener('keydown', (e) => {
             keys[e.key.toLowerCase()] = true;
@@ -543,54 +746,54 @@
         });
 
         function handleKeyboard() {
-            // W/S: Throttle
             if (keys['w']) state.throttle = Math.min(1.0, state.throttle + 0.02);
             if (keys['s']) state.throttle = Math.max(0.0, state.throttle - 0.02);
-            // A/D: Yaw
             if (keys['a']) state.yawInput = -1;
             else if (keys['d']) state.yawInput = 1;
-            else if (!keys['a'] && !keys['d'] && state.yawInput === 0) {}
 
-            // Arrow keys / IJKL for Pitch & Roll
             if (keys['arrowup'] || keys['i']) state.pitchInput = 1;
             else if (keys['arrowdown'] || keys['k']) state.pitchInput = -1;
-            else state.pitchInput = 0;
+            else if (!keys['arrowup'] && !keys['arrowdown'] && !keys['i'] && !keys['k'] && state.pitchInput !== 0 && !keys['mousestate']) state.pitchInput = 0;
 
             if (keys['arrowleft'] || keys['j']) state.rollInput = -1;
             else if (keys['arrowright'] || keys['l']) state.rollInput = 1;
-            else state.rollInput = 0;
+            else if (!keys['arrowleft'] && !keys['arrowright'] && !keys['j'] && !keys['l'] && state.rollInput !== 0 && !keys['mousestate']) state.rollInput = 0;
         }
 
-        // Physics Update Loop
+        // 6-DoF Flight Dynamics Update
         function updatePhysics() {
             handleKeyboard();
 
             const gravity = -9.81 * 0.016;
             let thrustMag = 0;
 
-            if (autoHover) {
-                // Altitude Hold PID
-                const targetAlt = 20.0;
+            if (!isArmed) {
+                // Disarmed
+                state.throttle = 0;
+                thrustMag = 0;
+            } else if (autoHover) {
+                // Loiter Orbit & Altitude Hold
+                const targetAlt = 35.0;
                 const altError = targetAlt - state.pos.y;
                 thrustMag = -gravity + altError * 0.005;
-                state.rot.z *= 0.9;
-                state.rot.x *= 0.9;
-                state.vel.x *= 0.92;
-                state.vel.z *= 0.92;
+
+                // Circular loiter path
+                state.rot.y += 0.008;
+                state.rot.z = Math.sin(Date.now() * 0.001) * 0.15;
+                state.rot.x = 0.08;
+                state.vel.x = Math.sin(state.rot.y) * 0.35;
+                state.vel.z = Math.cos(state.rot.y) * 0.35;
             } else {
-                thrustMag = state.throttle * 0.35;
+                thrustMag = state.throttle * 0.42;
                 state.rot.y -= state.yawInput * 0.04;
                 state.rot.x = state.pitchInput * 0.45;
                 state.rot.z = -state.rollInput * 0.45;
+
+                const up = new THREE.Vector3(0, 1, 0).applyEuler(state.rot);
+                state.vel.addScaledVector(up, thrustMag);
+                state.vel.y += gravity;
+                state.vel.multiplyScalar(0.98); // Aerodynamic drag
             }
-
-            // Forward vector based on drone yaw and pitch
-            const forward = new THREE.Vector3(0, 0, 1).applyEuler(state.rot);
-            const up = new THREE.Vector3(0, 1, 0).applyEuler(state.rot);
-
-            state.vel.addScaledVector(up, thrustMag);
-            state.vel.y += gravity;
-            state.vel.multiplyScalar(0.97); // Air drag
 
             state.pos.add(state.vel);
 
@@ -605,28 +808,57 @@
 
             // Spin Propellers
             rotors.forEach(r => {
-                r.rotation.y += 0.4 + state.throttle * 0.8;
+                r.rotation.y += 0.4 + state.throttle * 0.9;
             });
 
             updateMotorAudio(state.throttle);
 
-            // Update Chase Camera
-            const camOffset = new THREE.Vector3(0, 2.5, -6.5).applyEuler(new THREE.Euler(0, state.rot.y, 0));
+            // Chase & Gimbal Camera Position
+            const camOffset = new THREE.Vector3(0, 3.2, -8.5).applyEuler(new THREE.Euler(0, state.rot.y, 0));
             camera.position.copy(state.pos).add(camOffset);
-            camera.lookAt(state.pos.x, state.pos.y + 0.8, state.pos.z + 5);
+            camera.lookAt(state.pos.x, state.pos.y + 1.2, state.pos.z + 8);
 
-            // Check Waypoints Collision
+            // Check Recon Corridor Collision
             const currentGate = waypoints[activeWaypointIndex];
-            if (currentGate && state.pos.distanceTo(currentGate.position) < 6.0) {
+            if (currentGate && state.pos.distanceTo(currentGate.position) < 8.0) {
                 currentGate.material.color.setHex(0x38bdf8); // Turned blue
                 activeWaypointIndex = (activeWaypointIndex + 1) % waypoints.length;
-                document.getElementById('gateScore').innerText = `${activeWaypointIndex} / ${waypoints.length}`;
+                document.getElementById('gateScore').innerText = `${activeWaypointIndex} / ${waypoints.length} COMPLETED`;
+                addMavlinkLog(`[NAV] Waypoint ${activeWaypointIndex} cleared. Advancing flight plan.`);
             }
 
-            // Update HUD & Telemetry
+            // Update Tactical HUD, MGRS, and Target Projections
             updateHUD();
+            updateTargetProjections();
         }
 
+        // Project 3D Target Coordinates onto 2D HUD Screen
+        function updateTargetProjections() {
+            const container = document.getElementById('threeContainer');
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+
+            targets.forEach((tgt, idx) => {
+                const screenPos = tgt.pos.clone().project(camera);
+                const elem = document.getElementById(tgt.boxId);
+                if (screenPos.z < 1) { // In front of camera
+                    const x = (screenPos.x * 0.5 + 0.5) * w;
+                    const y = (-screenPos.y * 0.5 + 0.5) * h;
+                    elem.style.display = 'block';
+                    elem.style.left = `${x - 35}px`;
+                    elem.style.top = `${y - 25}px`;
+                    if (isTargetLocked && idx === 0) {
+                        elem.classList.add('locked');
+                    } else {
+                        elem.classList.remove('locked');
+                    }
+                } else {
+                    elem.style.display = 'none';
+                }
+            });
+        }
+
+        // Heads-Up Display Telemetry Feed
         function updateHUD() {
             const alt = Math.max(0, state.pos.y).toFixed(1);
             const speed = (state.vel.length() * 60).toFixed(1);
@@ -638,14 +870,100 @@
             document.getElementById('hudAirspeedText').textContent = Math.round(speed);
 
             const hdgPad = hdg.padStart(3, '0');
-            document.getElementById('compassText').textContent = `HDG: ${hdgPad}°`;
+            document.getElementById('compassText').textContent = `HDG: ${hdgPad}° [${getCardinal(hdg)}]`;
 
-            // Tilt horizon line with drone roll
             const horizon = document.getElementById('horizonLine');
             if (horizon) {
-                const pitchOffset = state.rot.x * 60;
+                const pitchOffset = state.rot.x * 65;
                 horizon.setAttribute('transform', `translate(0, ${pitchOffset}) rotate(${(-state.rot.z * 180 / Math.PI)})`);
             }
+
+            // MGRS Coordinate calculation
+            const easting = 1450 + Math.round(state.pos.x / 10);
+            const northing = 8930 + Math.round(state.pos.z / 10);
+            document.getElementById('mgrsCoord').innerText = `38Q KM ${easting} ${northing}`;
+
+            drawTacMap();
+        }
+
+        function getCardinal(deg) {
+            const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+            return dirs[Math.round(deg / 45) % 8];
+        }
+
+        // Tactical 2D Radar Airspace Canvas
+        const mapCanvas = document.getElementById('tacMapCanvas');
+        const mapCtx = mapCanvas.getContext('2d');
+
+        function drawTacMap() {
+            mapCtx.fillStyle = '#020617';
+            mapCtx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+            // Draw Military Grid Lines
+            mapCtx.strokeStyle = 'rgba(16, 185, 129, 0.15)';
+            mapCtx.lineWidth = 1;
+            for (let x = 0; x < mapCanvas.width; x += 30) {
+                mapCtx.beginPath();
+                mapCtx.moveTo(x, 0);
+                mapCtx.lineTo(x, mapCanvas.height);
+                mapCtx.stroke();
+            }
+            for (let y = 0; y < mapCanvas.height; y += 30) {
+                mapCtx.beginPath();
+                mapCtx.moveTo(0, y);
+                mapCtx.lineTo(mapCanvas.width, y);
+                mapCtx.stroke();
+            }
+
+            const cx = mapCanvas.width / 2;
+            const cy = mapCanvas.height / 2;
+            const scale = 0.45;
+
+            // Draw Targets on Map
+            targets.forEach(t => {
+                const tx = cx + t.pos.x * scale;
+                const ty = cy - t.pos.z * scale;
+                mapCtx.fillStyle = '#ef4444';
+                mapCtx.beginPath();
+                mapCtx.arc(tx, ty, 3, 0, Math.PI * 2);
+                mapCtx.fill();
+            });
+
+            // Draw Waypoints on Map
+            mapCtx.strokeStyle = '#10b981';
+            mapCtx.beginPath();
+            waypoints.forEach((w, i) => {
+                const wx = cx + w.position.x * scale;
+                const wy = cy - w.position.z * scale;
+                if (i === 0) mapCtx.moveTo(wx, wy);
+                else mapCtx.lineTo(wx, wy);
+            });
+            mapCtx.stroke();
+
+            // Draw Drone Icon (Cyan Triangle)
+            const dx = cx + state.pos.x * scale;
+            const dy = cy - state.pos.z * scale;
+
+            mapCtx.save();
+            mapCtx.translate(dx, dy);
+            mapCtx.rotate(-state.rot.y);
+            mapCtx.fillStyle = '#06b6d4';
+            mapCtx.beginPath();
+            mapCtx.moveTo(0, -6);
+            mapCtx.lineTo(4, 5);
+            mapCtx.lineTo(-4, 5);
+            mapCtx.closePath();
+            mapCtx.fill();
+            mapCtx.restore();
+        }
+
+        // MAVLink Log helper
+        function addMavlinkLog(msg) {
+            const logBox = document.getElementById('mavlinkLog');
+            const div = document.createElement('div');
+            div.textContent = msg;
+            logBox.prepend(div);
+            if (logBox.children.length > 20) logBox.removeChild(logBox.lastChild);
         }
 
         function onResize() {
@@ -656,20 +974,18 @@
             camera.updateProjectionMatrix();
             renderer.setSize(w, h);
 
-            // Reposition HUD SVGs
             const hudCenter = document.getElementById('hudCenter');
             hudCenter.setAttribute('transform', `translate(${w / 2}, ${h / 2})`);
 
             const altTape = document.getElementById('altTapeGroup');
-            altTape.setAttribute('transform', `translate(${w - 70}, 0)`);
+            altTape.setAttribute('transform', `translate(${w - 75}, 0)`);
 
             const compass = document.getElementById('compassRect');
-            compass.setAttribute('x', `${w / 2 - 110}`);
+            compass.setAttribute('x', `${w / 2 - 120}`);
             const compassText = document.getElementById('compassText');
             compassText.setAttribute('x', `${w / 2}`);
         }
 
-        // Animation Loop
         function animate() {
             requestAnimationFrame(animate);
             updatePhysics();
@@ -677,67 +993,131 @@
         }
 
         // UI Event Listeners
-        document.getElementById('droneQuadBtn').addEventListener('click', () => {
-            droneType = 'quad';
-            buildDroneModel();
-            document.getElementById('droneQuadBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white shadow-md shadow-emerald-600/30 flex items-center space-x-1.5";
-            document.getElementById('droneFixedBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-emerald-300 flex items-center space-x-1.5";
-            document.getElementById('droneFpvBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-emerald-300 flex items-center space-x-1.5";
-        });
-
         document.getElementById('droneFixedBtn').addEventListener('click', () => {
             droneType = 'fixed';
             buildDroneModel();
             document.getElementById('droneFixedBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white shadow-md shadow-emerald-600/30 flex items-center space-x-1.5";
-            document.getElementById('droneQuadBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-emerald-300 flex items-center space-x-1.5";
-            document.getElementById('droneFpvBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-emerald-300 flex items-center space-x-1.5";
+            document.getElementById('droneQuadBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5";
+            document.getElementById('droneFpvBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5";
+            addMavlinkLog("[UAS] Airframe switched to Saqr-1 MALE Long-Endurance.");
+        });
+
+        document.getElementById('droneQuadBtn').addEventListener('click', () => {
+            droneType = 'quad';
+            buildDroneModel();
+            document.getElementById('droneQuadBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white shadow-md shadow-emerald-600/30 flex items-center space-x-1.5";
+            document.getElementById('droneFixedBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5";
+            document.getElementById('droneFpvBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5";
+            addMavlinkLog("[UAS] Airframe switched to Tactical VTOL Hexacopter.");
         });
 
         document.getElementById('droneFpvBtn').addEventListener('click', () => {
             droneType = 'fpv';
             buildDroneModel();
             document.getElementById('droneFpvBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white shadow-md shadow-emerald-600/30 flex items-center space-x-1.5";
-            document.getElementById('droneQuadBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-emerald-300 flex items-center space-x-1.5";
-            document.getElementById('droneFixedBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-emerald-300 flex items-center space-x-1.5";
+            document.getElementById('droneFixedBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5";
+            document.getElementById('droneQuadBtn').className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5";
+            addMavlinkLog("[UAS] Airframe switched to FPV Kamikaze Interceptor.");
         });
 
-        // Camera Modes (RGB -> FLIR -> NVG)
-        const camModes = ['RGB', 'FLIR', 'NVG'];
+        // Vision Sensors (RGB / FLIR / NVG)
+        const camModes = ['RGB HD', 'FLIR THERMAL', 'NVG NIGHT'];
         let camModeIdx = 0;
         document.getElementById('camModeBtn').addEventListener('click', () => {
             camModeIdx = (camModeIdx + 1) % camModes.length;
             const mode = camModes[camModeIdx];
             document.getElementById('txtCamMode').innerText = mode;
             const container = document.getElementById('threeContainer');
-            if (mode === 'FLIR') {
+            if (mode === 'FLIR THERMAL') {
                 container.className = 'w-full h-full relative cursor-crosshair flir-thermal';
-            } else if (mode === 'NVG') {
+            } else if (mode === 'NVG NIGHT') {
                 container.className = 'w-full h-full relative cursor-crosshair nvg-mode';
             } else {
                 container.className = 'w-full h-full relative cursor-crosshair';
             }
+            addMavlinkLog(`[PAYLOAD] EO/IR sensor switched to: ${mode}`);
         });
 
-        // Auto Hover & RTH
+        // Electronic Warfare Jamming Simulator
+        document.getElementById('jammingBtn').addEventListener('click', () => {
+            isJamming = !isJamming;
+            const btn = document.getElementById('jammingBtn');
+            const txt = document.getElementById('txtJamming');
+            const gpsBadge = document.getElementById('telGps');
+            const rssiBadge = document.getElementById('telRssi');
+
+            if (isJamming) {
+                btn.className = "px-2.5 py-1 text-xs font-bold rounded bg-rose-600 text-white animate-pulse transition flex items-center space-x-1";
+                txt.innerText = I18N[currentLang].jammingActive;
+                gpsBadge.innerText = "NO-FIX (JAMMED)";
+                gpsBadge.className = "font-bold text-rose-500 font-mono";
+                rssiBadge.innerText = "-105 dBm (LOST)";
+                rssiBadge.className = "font-bold text-rose-500 font-mono";
+                addMavlinkLog("[EW ALERT] High-power RF Jamming Detected! GPS Lost. Engaging EKF Dead-Reckoning!");
+            } else {
+                btn.className = "px-2.5 py-1 text-xs font-bold rounded bg-rose-950/80 border border-rose-600/60 hover:bg-rose-900 text-rose-300 transition flex items-center space-x-1";
+                txt.innerText = I18N[currentLang].jamming;
+                gpsBadge.innerText = "18 3D-FIX";
+                gpsBadge.className = "font-bold text-emerald-400 font-mono";
+                rssiBadge.innerText = "-54 dBm (99%)";
+                rssiBadge.className = "font-bold text-emerald-400 font-mono";
+                addMavlinkLog("[EW] Jamming cleared. GPS GNSS satellite lock restored.");
+            }
+        });
+
+        // Arm / Disarm
+        document.getElementById('armBtn').addEventListener('click', () => {
+            isArmed = !isArmed;
+            const btn = document.getElementById('armBtn');
+            const armText = document.getElementById('txtArm');
+            const statusBadge = document.getElementById('telArmStatus');
+            if (isArmed) {
+                btn.className = "px-3 py-1.5 text-xs font-bold rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-900 transition flex items-center space-x-1";
+                armText.innerText = I18N[currentLang].arm;
+                statusBadge.innerText = "ARMED (GUIDED)";
+                statusBadge.className = "font-bold text-emerald-400";
+                addMavlinkLog("[CMD] MAV_CMD_COMPONENT_ARM: Arming throttle motors.");
+            } else {
+                btn.className = "px-3 py-1.5 text-xs font-bold rounded bg-rose-950 border border-rose-600/50 text-rose-300 hover:bg-rose-900 transition flex items-center space-x-1";
+                armText.innerText = I18N[currentLang].disarm;
+                statusBadge.innerText = "DISARMED";
+                statusBadge.className = "font-bold text-rose-400";
+                addMavlinkLog("[CMD] MAV_CMD_COMPONENT_ARM: Disarming throttle motors.");
+            }
+        });
+
+        // Loiter / Auto-Hover
         document.getElementById('autoHoverBtn').addEventListener('click', () => {
             autoHover = !autoHover;
             document.getElementById('autoHoverBtn').className = autoHover ?
-                "px-2.5 py-1 text-xs font-bold rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 flex items-center space-x-1" :
-                "px-2.5 py-1 text-xs font-bold rounded bg-gray-900 border border-gray-700 text-gray-400 flex items-center space-x-1";
+                "px-3 py-1.5 text-xs font-bold rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 flex items-center space-x-1" :
+                "px-3 py-1.5 text-xs font-bold rounded bg-slate-900 border border-slate-700 text-slate-300 flex items-center space-x-1";
+            addMavlinkLog(autoHover ? "[NAV] Mode changed to AUTO_LOITER." : "[NAV] Mode changed to MANUAL_GUIDED.");
         });
 
+        // Return to Launch RTL
         document.getElementById('rthBtn').addEventListener('click', () => {
             autoHover = true;
-            state.pos.set(0, 15, 0);
+            state.pos.set(0, 35, 0);
             state.vel.set(0, 0, 0);
             state.rot.set(0, 0, 0);
+            addMavlinkLog("[SAFETY] Return-To-Launch (RTL) triggered. Flying to base.");
         });
 
-        document.getElementById('resetFlightBtn').addEventListener('click', () => {
-            state.pos.set(0, 10, 0);
-            state.vel.set(0, 0, 0);
-            state.rot.set(0, 0, 0);
-            autoHover = true;
+        // Laser Target Designation Lock
+        document.getElementById('laserDesignatorBtn').addEventListener('click', () => {
+            isTargetLocked = !isTargetLocked;
+            const btn = document.getElementById('laserDesignatorBtn');
+            const txt = document.getElementById('txtDesignate');
+            if (isTargetLocked) {
+                btn.className = "px-3 py-1.5 text-xs font-bold rounded bg-emerald-600 text-white font-bold transition flex items-center space-x-1";
+                txt.innerText = I18N[currentLang].designated;
+                addMavlinkLog("[WEAPON] Laser Designator Locked on TARGET-01 (MGRS 38Q KM 1455 8942)!");
+            } else {
+                btn.className = "px-3 py-1.5 text-xs font-bold rounded bg-rose-950 border border-rose-600/50 text-rose-300 hover:bg-rose-900 transition flex items-center space-x-1";
+                txt.innerText = I18N[currentLang].designate;
+                addMavlinkLog("[WEAPON] Laser Designator Standby.");
+            }
         });
 
         // Sound Toggle
@@ -755,19 +1135,24 @@
 
             const t = I18N[currentLang];
             document.getElementById('subHeaderDesc').innerText = t.subDesc;
-            document.getElementById('txtQuad').innerText = t.quad;
             document.getElementById('txtFixed').innerText = t.fixed;
+            document.getElementById('txtQuad').innerText = t.quad;
             document.getElementById('txtFpv').innerText = t.fpv;
-            document.getElementById('txtAcademyTitle').innerHTML = `<i class="fa-solid fa-graduation-cap mr-1"></i> ${t.academy}`;
+            document.getElementById('txtAcademyTitle').innerText = t.academy;
             document.getElementById('missionDesc').innerText = t.mission1;
             document.getElementById('txtAutoHover').innerText = t.hover;
             document.getElementById('txtRTH').innerText = t.rth;
+            document.getElementById('txtArm').innerText = isArmed ? t.arm : t.disarm;
+            document.getElementById('txtDesignate').innerText = isTargetLocked ? t.designated : t.designate;
             document.getElementById('leftStickLabel').innerText = t.throttleYaw;
             document.getElementById('rightStickLabel').innerText = t.pitchRoll;
             document.getElementById('scoreLabel').innerText = t.scoreText;
+            document.getElementById('mapTitle').innerText = t.mapTitle;
+            document.getElementById('mavlinkTitle').innerText = t.mavlinkTitle;
+            document.getElementById('txtJamming').innerText = isJamming ? t.jammingActive : t.jamming;
         });
 
-        // Init
+        // Initialize simulation
         initThree();
     </script>
 </body>
