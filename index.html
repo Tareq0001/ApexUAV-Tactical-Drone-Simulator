@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ApexUAV Defense Edition — Tactical Drone Flight Simulator & GCS Command</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js & OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Tajawal:wght@500;700;800&display=swap');
+
+        body {
+            font-family: 'JetBrains Mono', 'Tajawal', monospace;
+            background-color: #020617;
+            color: #f8fafc;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+        }
+
+        .font-chakra { font-family: 'Chakra Petch', sans-serif; }
+
+        /* Tactical HUD overlay styling */
+        .hud-line { stroke: #10b981; stroke-width: 1.5; fill: none; }
+        .hud-text { font-family: 'JetBrains Mono', monospace; font-size: 11px; fill: #10b981; }
+
+        /* Military Shaders */
+        .flir-thermal {
+            filter: contrast(190%) brightness(115%) invert(100%) hue-rotate(185deg) saturate(260%);
+        }
+        .nvg-mode {
+            filter: contrast(170%) brightness(130%) sepia(100%) hue-rotate(75deg) saturate(320%);
+        }
+        .crt-scanlines {
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 3px 100%;
+            pointer-events: none;
+        }
+
+        /* Virtual Gimbal Stick */
+        .gimbal-base {
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.75);
+            border: 2px solid rgba(16, 185, 129, 0.5);
+            box-shadow: inset 0 0 15px rgba(16, 185, 129, 0.25);
+            position: relative;
+            touch-action: none;
+        }
+        .gimbal-knob {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #34d399 15%, #059669 85%);
+            box-shadow: 0 0 12px #10b981;
+            position: absolute;
+            top: 33px;
+            left: 33px;
+            pointer-events: none;
+            transition: transform 0.05s ease-out;
+        }
+
+        /* Target Bounding Box */
+        .target-box {
+            position: absolute;
+            border: 2px solid #ef4444;
+            background: rgba(239, 68, 68, 0.12);
+            pointer-events: auto;
+            cursor: crosshair;
+            transition: all 0.1s ease;
+        }
+        .target-box.locked {
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.18);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(3, 7, 18, 0.8); }
+        ::-webkit-scrollbar-thumb { background: #059669; border-radius: 2px; }
+    </style>
+  <script type="module" crossorigin src="./assets/index-BEatUbIL.js"></script>
+</head>
+<body class="w-screen h-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
+
+    <!-- Top Military Tactical GCS Banner -->
+    <header class="h-13 border-b border-emerald-900/60 bg-slate-950/95 flex items-center justify-between px-3 md:px-5 z-30 shrink-0">
+        <div class="flex items-center space-x-3 rtl:space-x-reverse">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-slate-950 shadow-lg shadow-emerald-500/30">
+                <i class="fa-solid fa-crosshairs text-lg"></i>
+            </div>
+            <div>
+                <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                    <span class="font-chakra font-bold text-base md:text-lg tracking-wider text-emerald-400">APEX<span class="text-white">UAV</span> <span class="text-xs text-amber-400 font-mono">[DEFENSE EDITION]</span></span>
+                    <span class="hidden md:inline-block px-2 py-0.5 text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60 rounded">STANAG 4586 // MIL-STD-810H</span>
+                </div>
+                <p class="text-[9px] text-slate-400 -mt-1 hidden sm:block" id="subHeaderDesc">Tactical Unmanned Aerial Systems (UAS) Flight Dynamics, GCS & AI Defense Academy</p>
+            </div>
+        </div>
+
+        <!-- Telemetry Highlights -->
+        <div class="hidden lg:flex items-center space-x-5 rtl:space-x-reverse text-xs font-mono">
+            <div class="flex items-center space-x-1.5 rtl:space-x-reverse">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="text-slate-500 text-[10px]">FLIGHT STATE:</span>
+                <span id="telArmStatus" class="font-bold text-emerald-400">ARMED (GUIDED)</span>
+            </div>
+            <div>
+                <span class="text-slate-500 text-[10px]">ALT:</span>
+                <span id="telAlt" class="font-bold text-emerald-400">42.5 m</span>
+            </div>
+            <div>
+                <span class="text-slate-500 text-[10px]">IAS:</span>
+                <span id="telSpd" class="font-bold text-cyan-400">24.2 m/s</span>
+            </div>
+            <div>
+                <span class="text-slate-500 text-[10px]">6S LiPo:</span>
+                <span id="telBatt" class="font-bold text-amber-400">22.8V (86%)</span>
+            </div>
+            <div>
+                <span class="text-slate-500 text-[10px]">C2 LINK:</span>
+                <span id="telRssi" class="font-bold text-emerald-400">-54 dBm (99%)</span>
+            </div>
+            <div>
+                <span class="text-slate-500 text-[10px]">GPS SAT:</span>
+                <span id="telGps" class="font-bold text-emerald-400">18 3D-FIX</span>
+            </div>
+        </div>
+
+        <!-- Right Quick Controls -->
+        <div class="flex items-center space-x-2 rtl:space-x-reverse">
+            <!-- Cam Vision Mode -->
+            <button id="camModeBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-300 transition" title="Cycle Vision Sensor (Daylight RGB / FLIR Thermal / Night Vision NVG)">
+                <i class="fa-solid fa-eye mr-1 text-emerald-400"></i><span id="txtCamMode">RGB HD</span>
+            </button>
+            <!-- Electronic Warfare Jamming Simulator -->
+            <button id="jammingBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-rose-950/80 border border-rose-600/60 hover:bg-rose-900 text-rose-300 transition flex items-center space-x-1" title="Inject Electronic Warfare (EW) GPS & C2 Jamming">
+                <i class="fa-solid fa-tower-broadcast"></i><span class="hidden md:inline" id="txtJamming">EW JAMMING</span>
+            </button>
+            <!-- Audio Toggle -->
+            <button id="soundBtn" class="p-1.5 rounded bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-400 hover:text-emerald-400 transition" title="Brushless Motor / Turbofan Acoustics">
+                <i class="fa-solid fa-volume-high" id="soundIcon"></i>
+            </button>
+            <!-- Language Toggle -->
+            <button id="langToggleBtn" class="px-2.5 py-1 text-xs font-bold rounded bg-emerald-950 border border-emerald-600/60 text-emerald-300 hover:bg-emerald-900 transition">
+                عربي
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Command & Simulation Workspace -->
+    <div class="flex-1 relative overflow-hidden flex flex-col lg:flex-row">
+
+        <!-- Left / Center 3D Viewport with HUD & Targets -->
+        <div class="flex-1 relative h-full w-full bg-slate-950">
+            <!-- 3D Canvas -->
+            <div id="threeContainer" class="w-full h-full relative cursor-crosshair"></div>
+            <div id="crtOverlay" class="absolute inset-0 crt-scanlines"></div>
+
+            <!-- Optical AI Target Bounding Boxes (Dynamic 2D Tracking Projections) -->
+            <div id="targetLayer" class="absolute inset-0 pointer-events-none z-10 overflow-hidden">
+                <!-- Target 1: Armored Vehicle -->
+                <div id="tbox1" class="target-box rounded" style="top: 35%; left: 45%; width: 75px; height: 50px;">
+                    <div class="absolute -top-5 left-0 text-[9px] font-mono font-bold bg-slate-950/90 text-emerald-400 px-1 border border-emerald-700/60 whitespace-nowrap">
+                        [TGT-01] ARMORED 98.4%
+                    </div>
+                    <div class="absolute -bottom-4 right-0 text-[8px] font-mono text-slate-400">
+                        RNG: 420m
+                    </div>
+                </div>
+
+                <!-- Target 2: Radar Mast -->
+                <div id="tbox2" class="target-box rounded" style="top: 48%; left: 62%; width: 60px; height: 75px;">
+                    <div class="absolute -top-5 left-0 text-[9px] font-mono font-bold bg-slate-950/90 text-rose-400 px-1 border border-rose-700/60 whitespace-nowrap">
+                        [TGT-02] RADAR MAST 99.1%
+                    </div>
+                    <div class="absolute -bottom-4 right-0 text-[8px] font-mono text-slate-400">
+                        RNG: 680m
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modern Military Heads-Up Display (HUD) Overlay -->
+            <svg id="hudOverlay" class="absolute inset-0 w-full h-full pointer-events-none z-10">
+                <!-- Center Reticle & Pitch Ladder -->
+                <g id="hudCenter" transform="translate(0, 0)">
+                    <circle cx="0" cy="0" r="22" class="hud-line" stroke-dasharray="6,4"></circle>
+                    <line x1="-35" y1="0" x2="-10" y2="0" class="hud-line"></line>
+                    <line x1="10" y1="0" x2="35" y2="0" class="hud-line"></line>
+                    <line x1="0" y1="-35" x2="0" y2="-10" class="hud-line"></line>
+                    <line x1="0" y1="10" x2="0" y2="35" class="hud-line"></line>
+                    <!-- Laser Rangefinder Pip -->
+                    <circle cx="0" cy="0" r="3" fill="#ef4444"></circle>
+                    <!-- Artificial Horizon Line -->
+                    <line id="horizonLine" x1="-140" y1="0" x2="140" y2="0" stroke="#10b981" stroke-width="2"></line>
+                </g>
+
+                <!-- Airspeed Tape (Left) -->
+                <rect x="25" y="110" width="48" height="190" fill="rgba(6, 78, 59, 0.35)" stroke="#10b981" stroke-width="1.2" rx="4"></rect>
+                <text x="49" y="130" text-anchor="middle" class="hud-text" font-weight="bold">IAS</text>
+                <text id="hudAirspeedText" x="49" y="210" text-anchor="middle" class="hud-text" font-size="18" font-weight="bold" fill="#34d399">24</text>
+                <text x="49" y="235" text-anchor="middle" class="hud-text" font-size="9">M/S</text>
+
+                <!-- Barometric Altitude Tape (Right) -->
+                <g id="altTapeGroup" transform="translate(0, 0)">
+                    <rect id="altRect" x="0" y="110" width="48" height="190" fill="rgba(6, 78, 59, 0.35)" stroke="#10b981" stroke-width="1.2" rx="4"></rect>
+                    <text id="altLabel" x="0" y="130" text-anchor="middle" class="hud-text" font-weight="bold">ALT</text>
+                    <text id="hudAltText" x="0" y="210" text-anchor="middle" class="hud-text" font-size="18" font-weight="bold" fill="#34d399">42</text>
+                    <text id="altUnits" x="0" y="235" text-anchor="middle" class="hud-text" font-size="9">MSL</text>
+                </g>
+
+                <!-- Compass Heading Tape (Top Center) -->
+                <rect x="0" y="15" width="240" height="30" fill="rgba(6, 78, 59, 0.35)" stroke="#10b981" stroke-width="1.2" rx="4" id="compassRect"></rect>
+                <text id="compassText" x="0" y="35" text-anchor="middle" class="hud-text" font-size="14" font-weight="bold" fill="#34d399">HDG: 045° [NE]</text>
+            </svg>
+
+            <!-- Drone Category Tactical Selector (Top Left) -->
+            <div class="absolute top-4 left-4 z-20 flex space-x-1.5 rtl:space-x-reverse bg-slate-950/85 p-1.5 rounded-xl border border-emerald-800/60 backdrop-blur-md">
+                <button id="droneFixedBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white shadow-md shadow-emerald-600/30 flex items-center space-x-1.5">
+                    <i class="fa-solid fa-plane"></i>
+                    <span id="txtFixed">Saqr-1 MALE Long-Endurance</span>
+                </button>
+                <button id="droneQuadBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5">
+                    <i class="fa-solid fa-drone"></i>
+                    <span id="txtQuad">Tactical VTOL Hexacopter</span>
+                </button>
+                <button id="droneFpvBtn" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-emerald-300 flex items-center space-x-1.5">
+                    <i class="fa-solid fa-bolt"></i>
+                    <span id="txtFpv">FPV Kamikaze Interceptor</span>
+                </button>
+            </div>
+
+            <!-- Virtual RC Dual Gimbals (Tactile Mobile & Desktop Controls) -->
+            <div class="absolute bottom-5 inset-x-4 z-20 flex justify-between pointer-events-none">
+                <!-- Left Stick: Throttle & Yaw -->
+                <div class="pointer-events-auto flex flex-col items-center">
+                    <div class="gimbal-base" id="leftGimbal">
+                        <div class="gimbal-knob" id="leftKnob"></div>
+                    </div>
+                    <div class="text-[10px] text-emerald-400 font-mono mt-1 font-bold" id="leftStickLabel">THROTTLE / YAW</div>
+                </div>
+
+                <!-- Tactical Flight Action Buttons -->
+                <div class="pointer-events-auto self-end flex space-x-2 rtl:space-x-reverse bg-slate-950/85 px-3 py-2 rounded-xl border border-emerald-800/60 backdrop-blur-md">
+                    <button id="armBtn" class="px-3 py-1.5 text-xs font-bold rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-900 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-power-off"></i>
+                        <span id="txtArm">ARM MOTORS</span>
+                    </button>
+                    <button id="autoHoverBtn" class="px-3 py-1.5 text-xs font-bold rounded bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-300 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-anchor"></i>
+                        <span id="txtAutoHover">LOITER ORBIT</span>
+                    </button>
+                    <button id="rthBtn" class="px-3 py-1.5 text-xs font-bold rounded bg-slate-900 border border-slate-700 hover:border-emerald-500 text-slate-300 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-house-chimney"></i>
+                        <span id="txtRTH">RTL FAILSAFE</span>
+                    </button>
+                    <button id="laserDesignatorBtn" class="px-3 py-1.5 text-xs font-bold rounded bg-rose-950 border border-rose-600/50 text-rose-300 hover:bg-rose-900 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-bullseye"></i>
+                        <span id="txtDesignate">LOCK TARGET</span>
+                    </button>
+                </div>
+
+                <!-- Right Stick: Pitch & Roll -->
+                <div class="pointer-events-auto flex flex-col items-center">
+                    <div class="gimbal-base" id="rightGimbal">
+                        <div class="gimbal-knob" id="rightKnob"></div>
+                    </div>
+                    <div class="text-[10px] text-emerald-400 font-mono mt-1 font-bold" id="rightStickLabel">PITCH / ROLL</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Tactical GCS Side Console (STANAG 4586 Command Deck) -->
+        <div class="w-full lg:w-96 bg-slate-950/95 border-t lg:border-t-0 lg:border-l border-emerald-900/60 flex flex-col h-auto lg:h-full overflow-y-auto p-3.5 space-y-3.5 shrink-0 z-20">
+
+            <!-- Military Tactical Map (MGRS Military Grid Reference System) -->
+            <div class="bg-slate-900/90 rounded-xl p-3 border border-slate-800">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold text-emerald-400 flex items-center">
+                        <i class="fa-solid fa-map-location-dot mr-1.5 text-emerald-400"></i>
+                        <span id="mapTitle">MGRS TACTICAL AIRSPACE MAP</span>
+                    </span>
+                    <span class="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-700/50">ZONE 38Q // SAUDI AIRSPACE</span>
+                </div>
+                <div class="relative w-full h-36 bg-black rounded border border-slate-800 overflow-hidden">
+                    <canvas id="tacMapCanvas" width="350" height="144" class="w-full h-full"></canvas>
+                    <!-- Compass Rose in corner -->
+                    <div class="absolute top-1 right-1 text-[9px] text-emerald-500 font-mono font-bold bg-slate-950/80 px-1 rounded">
+                        N ↑
+                    </div>
+                </div>
+                <div class="flex justify-between items-center text-[10px] text-slate-400 mt-1.5 font-mono">
+                    <span>MGRS: <span id="mgrsCoord" class="text-emerald-300 font-bold">38Q KM 1452 8931</span></span>
+                    <span>WPT: <span id="activeWptText" class="text-cyan-400 font-bold">WPT-03 (RECON)</span></span>
+                </div>
+            </div>
+
+            <!-- Pilot Certification Academy & Missions -->
+            <div class="bg-slate-900/90 rounded-xl p-3 border border-slate-800">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold text-emerald-400 flex items-center">
+                        <i class="fa-solid fa-graduation-cap mr-1.5 text-emerald-400"></i>
+                        <span id="txtAcademyTitle">PILOT DEFENSE ACADEMY</span>
+                    </span>
+                    <span id="missionBadge" class="text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-2 py-0.5 rounded">QUAL-01: ISR PATROL</span>
+                </div>
+                <p id="missionDesc" class="text-[11px] text-slate-300 leading-snug">
+                    Navigate through 6 aerial reconnaissance corridors while maintaining laser lock on moving tactical targets without radar detection.
+                </p>
+                <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-800 text-[10px]">
+                    <span class="text-slate-400" id="scoreLabel">Recon Waypoints Cleared:</span>
+                    <span id="gateScore" class="font-bold text-emerald-400 font-mono text-xs">0 / 6 COMPLETED</span>
+                </div>
+            </div>
+
+            <!-- Real-Time MAVLink Telemetry Stream -->
+            <div class="bg-slate-900/90 rounded-xl p-3 border border-slate-800 flex-1 flex flex-col min-h-[160px]">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold text-emerald-400 flex items-center">
+                        <i class="fa-solid fa-terminal mr-1.5 text-emerald-400"></i>
+                        <span id="mavlinkTitle">MAVLink v2 TELEMETRY STREAM</span>
+                    </span>
+                    <span class="text-[9px] font-mono text-cyan-400 bg-cyan-950/80 px-1.5 py-0.5 rounded">PORT: UDP 14550</span>
+                </div>
+                <div id="mavlinkLog" class="flex-1 overflow-y-auto space-y-1 text-[10px] font-mono pr-1 text-slate-300 bg-black/60 p-2 rounded border border-slate-800">
+                    <div class="text-emerald-400">[MAV] HEARTBEAT: Autopilot PX4 v1.14.0 | Armed: TRUE | Mode: GUIDED</div>
+                    <div class="text-slate-400">[MAV] SYS_STATUS: Battery 22.84V | Current 34.2A | CPU Load 18%</div>
+                    <div class="text-cyan-400">[MAV] GPS_RAW_INT: Lat 24.7136° | Lon 46.6753° | FixType 3D_RTK</div>
+                    <div class="text-slate-400">[MAV] ATTITUDE: Roll -0.012 rad | Pitch 0.045 rad | Yaw 0.785 rad</div>
+                    <div class="text-amber-400">[MAV] EKF3_STATUS: IMU Fusion 100% | Optical Flow Active</div>
+                </div>
+            </div>
+
+            <!-- Defense Standards Stamp -->
+            <div class="pt-2 border-t border-slate-800 text-[10px] text-slate-500 flex justify-between items-center">
+                <span>Eng. Tareq Aboushi</span>
+                <span class="text-emerald-500 font-mono">UAV Systems & Avionics</span>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modular TypeScript Engine Entrypoint -->
+</body>
+</html>
