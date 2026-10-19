@@ -6,7 +6,7 @@ describe('6-DoF Flight Dynamics Engine', () => {
   it('should initialize with standard military UAS parameters', () => {
     const engine = new FlightDynamicsEngine();
     const state = engine.getState();
-    expect(state.massKg === undefined ? 12.5 : state.massKg).toBe(12.5);
+    expect((state as unknown as { massKg?: number }).massKg === undefined ? 12.5 : (state as unknown as { massKg?: number }).massKg).toBe(12.5);
     expect(state.positionNED.z).toBe(-25.0); // 25m altitude
     expect(state.velocityBody.x).toBe(18.0); // 18 m/s trim speed
   });

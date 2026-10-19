@@ -11,6 +11,9 @@ import { CascadeAttitudeController } from '../avionics/pid.ts';
 import { MissionPlanner } from '../navigation/mission_planner.ts';
 import { TargetTracker } from '../vision/target_tracker.ts';
 import { DroneModelFactory, DroneCategory } from './drone_models.ts';
+import { DrydenAtmosphereEngine, AtmosphereState } from '../flight_dynamics/atmosphere_dryden.ts';
+import { TacticalSwarmController, WingmanAgent } from '../autonomy/swarm_controller.ts';
+import { BallisticsComputer, TPNResult, CCIPResult } from '../avionics/ballistics_computer.ts';
 
 export class SimEngine {
   public scene: THREE.Scene;
@@ -23,9 +26,14 @@ export class SimEngine {
   public pid: CascadeAttitudeController;
   public missionPlanner: MissionPlanner;
   public targetTracker: TargetTracker;
+  public atmosphere: DrydenAtmosphereEngine;
+  public swarmController: TacticalSwarmController;
+  public ballisticsComputer: BallisticsComputer;
 
   private droneRoot: THREE.Group;
   private rotors: THREE.Mesh[] = [];
+  private wingmanMeshes: THREE.Group[] = [];
+  private wingmanRotors: THREE.Mesh[][] = [];
   private waypointMeshes: THREE.Mesh[] = [];
   public currentCategory: DroneCategory = 'fixed';
 
@@ -58,6 +66,9 @@ export class SimEngine {
     this.pid = new CascadeAttitudeController();
     this.missionPlanner = new MissionPlanner();
     this.targetTracker = new TargetTracker();
+    this.atmosphere = new DrydenAtmosphereEngine('LIGHT');
+    this.swarmController = new TacticalSwarmController(Vec3.create(0, 25, 0));
+    this.ballisticsComputer = new BallisticsComputer();
 
     // Three.js Scene
     this.scene = new THREE.Scene();
@@ -78,6 +89,7 @@ export class SimEngine {
     this.setupTerrain();
     this.setupTargets();
     this.setupWaypoints();
+    this.setupWingmen();
     this.setDroneCategory('fixed');
   }
 
@@ -168,6 +180,76 @@ export class SimEngine {
     });
   }
 
+  private setupWingmen(): void {
+    const wingmen = this.swarmController.getWingmen();
+    const wingmanColors = [0x38bdf8, 0x10b981, 0xf59e0b]; // Cyan, Emerald, Amber tactical wingman accents
+
+    wingmen.forEach((w, idx) => {
+      const group = new THREE.Group();
+
+      // Wingman airframe (sleek tactical delta drone)
+      const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b,
+        metalness: 0.8,
+        roughness: 0.3
+      });
+      const wingMat = new THREE.MeshStandardMaterial({
+        color: 0x0f172a,
+        metalness: 0.6,
+        roughness: 0.4
+      });
+      const accentMat = new THREE.MeshStandardMaterial({
+        color: wingmanColors[idx % wingmanColors.length],
+        emissive: wingmanColors[idx % wingmanColors.length],
+        emissiveIntensity: 0.4
+      });
+
+      // Fuselage
+      const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.22, 4.2, 12), bodyMat);
+      fuselage.rotation.x = Math.PI / 2;
+      group.add(fuselage);
+
+      // Nose cone
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 12), accentMat);
+      nose.rotation.x = Math.PI / 2;
+      nose.position.set(0, 0, 2.6);
+      group.add(nose);
+
+      // Swept Delta Wings
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.08, 1.2), wingMat);
+      wing.position.set(0, 0.05, 0.2);
+      group.add(wing);
+
+      // Twin V-tail
+      const vTailL = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 0.6), wingMat);
+      vTailL.rotation.z = Math.PI / 4;
+      vTailL.position.set(0.6, 0.5, -1.8);
+      const vTailR = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 0.6), wingMat);
+      vTailR.rotation.z = -Math.PI / 4;
+      vTailR.position.set(-0.6, 0.5, -1.8);
+      group.add(vTailL);
+      group.add(vTailR);
+
+      // Navigation LEDs
+      const portNav = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+      portNav.position.set(-3.1, 0.05, 0.2);
+      const stbdNav = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshBasicMaterial({ color: 0x10b981 }));
+      stbdNav.position.set(3.1, 0.05, 0.2);
+      group.add(portNav);
+      group.add(stbdNav);
+
+      // Pusher Propeller
+      const prop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.02, 0.1), new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
+      prop.position.set(0, 0, -2.2);
+      group.add(prop);
+
+      group.position.set(w.positionWorld.x, w.positionWorld.y, w.positionWorld.z);
+      this.scene.add(group);
+      this.wingmanMeshes.push(group);
+      this.wingmanRotors.push([prop]);
+    });
+  }
+
   public setDroneCategory(category: DroneCategory): void {
     this.currentCategory = category;
     while (this.droneRoot.children.length > 0) {
@@ -204,7 +286,19 @@ export class SimEngine {
     droneRot: { roll: number; pitch: number; yaw: number };
     airspeed: number;
     altitude: number;
+    atmosphere: AtmosphereState;
+    wingmen: WingmanAgent[];
+    tpnResult: TPNResult;
+    ccipResult: CCIPResult;
   } {
+    // 0. Dryden Atmospheric Model & Turbulence
+    const currState = this.flightEngine.getState();
+    const altitudeAGL = Math.max(1.0, -currState.positionNED.z);
+    const airspeedPre = Math.max(0.1, Vec3.length(currState.velocityBody));
+    const atmoState = this.atmosphere.step(altitudeAGL, airspeedPre, dt);
+    this.flightEngine.setWind(atmoState.windNED, atmoState.turbulenceBody);
+    this.flightEngine.setAirDensity(atmoState.densityKgM3);
+
     // 1. Flight Dynamics update
     if (!this.isArmed) {
       this.flightEngine.setControls(0, 0, 0, 0);
@@ -260,6 +354,37 @@ export class SimEngine {
     this.camera.position.set(posX, posY, posZ).add(camOffset);
     this.camera.lookAt(posX, posY + 1.2, posZ + 8);
 
+    // 4. Autonomous Tactical Swarm Wingmen Consensus
+    const velNED = Quat.rotateVector(state.attitude, state.velocityBody);
+    const leaderVelWorld = Vec3.create(velNED.y, -velNED.z, velNED.x);
+    const leaderPosWorld = Vec3.create(posX, posY, posZ);
+
+    const wingmen = this.swarmController.step(leaderPosWorld, leaderVelWorld, euler.yaw, dt);
+    wingmen.forEach((w, idx) => {
+      const mesh = this.wingmanMeshes[idx];
+      if (mesh) {
+        mesh.position.set(w.positionWorld.x, w.positionWorld.y, w.positionWorld.z);
+        mesh.rotation.set(w.pitchRad, w.yawRad, -w.rollRad);
+      }
+      if (this.wingmanRotors[idx]) {
+        this.wingmanRotors[idx].forEach(r => {
+          r.rotation.y += 0.5 + state.throttle * 0.8;
+        });
+      }
+    });
+
+    // 5. Fire Control & Ballistics Computer (CCIP & TPN Intercept Lead)
+    const tgts = this.targetTracker.getTargets();
+    const primaryTgt = tgts[0] ?? { posWorld: Vec3.create(0, 0, 0), velWorld: Vec3.create(0, 0, 0) };
+    const tpnResult = this.ballisticsComputer.computeTPN(
+      leaderPosWorld,
+      leaderVelWorld,
+      primaryTgt.posWorld,
+      primaryTgt.velWorld,
+      3.5
+    );
+    const ccipResult = this.ballisticsComputer.computeCCIP(leaderPosWorld, leaderVelWorld);
+
     // Update targets
     this.targetTracker.updateTargets(dt);
 
@@ -276,7 +401,11 @@ export class SimEngine {
       dronePos: Vec3.create(posX, posY, posZ),
       droneRot: euler,
       airspeed,
-      altitude: posY
+      altitude: posY,
+      atmosphere: atmoState,
+      wingmen,
+      tpnResult,
+      ccipResult
     };
   }
 

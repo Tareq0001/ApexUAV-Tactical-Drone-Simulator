@@ -46,7 +46,6 @@ export class EKF3Estimator {
   private P_pos: number = 0.5;
   private P_vel: number = 0.1;
   private P_att: number = 0.01;
-  private P_bias: number = 0.001;
 
   // Process noise (Q)
   private readonly Q_accel: number = 0.02;
@@ -178,6 +177,7 @@ export class EKF3Estimator {
     // Position Kalman Gain
     const S_pos = this.P_pos + this.R_gps_pos;
     const K_pos = this.P_pos / S_pos;
+    this.P_pos *= (1 - K_pos);
 
     // Velocity Kalman Gain
     const S_vel = this.P_vel + this.R_gps_vel;

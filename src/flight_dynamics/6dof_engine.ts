@@ -34,6 +34,8 @@ export class FlightDynamicsEngine {
   private state: AircraftState;
   private airDensity: number = 1.225; // Sea-level standard atmosphere (kg/m3)
   private gravity: number = 9.80665;  // m/s2
+  private windNED: Vector3D = Vec3.create(0, 0, 0);
+  private turbulenceBody: Vector3D = Vec3.create(0, 0, 0);
 
   constructor(params?: Partial<AircraftParameters>) {
     this.params = {
@@ -57,6 +59,19 @@ export class FlightDynamicsEngine {
     };
   }
 
+  public setWind(windNED: Vector3D, turbulenceBody?: Vector3D): void {
+    this.windNED = windNED;
+    if (turbulenceBody) {
+      this.turbulenceBody = turbulenceBody;
+    }
+  }
+
+  public setAirDensity(densityKgM3: number): void {
+    if (densityKgM3 > 0.01) {
+      this.airDensity = densityKgM3;
+    }
+  }
+
   public step(dt: number): AircraftState {
     const subSteps = Math.max(1, Math.ceil(dt / 0.005));
     const dtSub = dt / subSteps;
@@ -67,13 +82,28 @@ export class FlightDynamicsEngine {
   }
 
   private integrateStep(dt: number): void {
-    // 1. Aerodynamic Airspeed & Dynamic Pressure
-    const airspeed = Vec3.length(this.state.velocityBody);
+    // 0. Attitude Conjugate for NED-to-Body Transformation
+    const qConj: Quaternion4D = {
+      w: this.state.attitude.w,
+      x: -this.state.attitude.x,
+      y: -this.state.attitude.y,
+      z: -this.state.attitude.z
+    };
+
+    // 1. Aerodynamic Relative Velocity (incorporating steady wind and Dryden turbulence)
+    const windBody = Quat.rotateVector(qConj, this.windNED);
+    const aeroVel: Vector3D = {
+      x: this.state.velocityBody.x - windBody.x + this.turbulenceBody.x,
+      y: this.state.velocityBody.y - windBody.y + this.turbulenceBody.y,
+      z: this.state.velocityBody.z - windBody.z + this.turbulenceBody.z
+    };
+
+    const airspeed = Vec3.length(aeroVel);
     const qBar = 0.5 * this.airDensity * Math.pow(Math.max(airspeed, 0.1), 2);
 
     // 2. Angle of Attack (Alpha) & Sideslip (Beta)
-    const alpha = Math.atan2(this.state.velocityBody.z, Math.max(Math.abs(this.state.velocityBody.x), 0.5));
-    const beta = Math.asin(Math.max(-1, Math.min(1, this.state.velocityBody.y / Math.max(airspeed, 0.5))));
+    const alpha = Math.atan2(aeroVel.z, Math.max(Math.abs(aeroVel.x), 0.5));
+    const beta = Math.asin(Math.max(-1, Math.min(1, aeroVel.y / Math.max(airspeed, 0.5))));
 
     // 3. Aerodynamic Coefficients
     const cL = this.params.liftCoeffSlope * alpha + this.state.controlSurfaces.elevator * -0.4;
@@ -89,12 +119,6 @@ export class FlightDynamicsEngine {
 
     // F_body = Thrust - Drag + Gravity projected into body frame
     const gravNED = Vec3.create(0, 0, this.params.massKg * this.gravity);
-    const qConj: Quaternion4D = {
-      w: this.state.attitude.w,
-      x: -this.state.attitude.x,
-      y: -this.state.attitude.y,
-      z: -this.state.attitude.z
-    };
     const gravBody = Quat.rotateVector(qConj, gravNED);
 
     const fBody: Vector3D = {
@@ -115,9 +139,9 @@ export class FlightDynamicsEngine {
     this.state.velocityBody = Vec3.add(this.state.velocityBody, Vec3.scale(accelBody, dt));
 
     // 6. Rotational Moments & Angular Acceleration
-    const lMoment = qBar * this.params.wingAreaM2 * this.params.wingspanM * (this.state.controlSurfaces.aileron * 0.15 - this.state.angularVelocity.x * 0.25);
-    const mMoment = qBar * this.params.wingAreaM2 * this.params.meanChordM * (this.state.controlSurfaces.elevator * 0.25 - this.state.angularVelocity.y * 0.35);
-    const nMoment = qBar * this.params.wingAreaM2 * this.params.wingspanM * (this.state.controlSurfaces.rudder * 0.08 - this.state.angularVelocity.z * 0.20);
+    const lMoment = qBar * this.params.wingAreaM2 * this.params.wingspanM * (this.state.controlSurfaces.aileron * 0.15 - this.state.angularVelocity.x * 0.25) + this.turbulenceBody.y * 0.2;
+    const mMoment = qBar * this.params.wingAreaM2 * this.params.meanChordM * (this.state.controlSurfaces.elevator * 0.25 - this.state.angularVelocity.y * 0.35) - this.turbulenceBody.z * 0.2;
+    const nMoment = qBar * this.params.wingAreaM2 * this.params.wingspanM * (this.state.controlSurfaces.rudder * 0.08 - this.state.angularVelocity.z * 0.20) + this.turbulenceBody.x * 0.1;
 
     // Euler Rotational Dynamics (I * w_dot + w x (I * w) = M)
     const p = this.state.angularVelocity.x;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MavlinkV2Framer, MavlinkMsgId, MAVLINK_V2_MAGIC, MavlinkCRC } from '../src/mavlink/mavlink_v2.ts';
+import { MavlinkV2Framer, MavlinkMsgId, MAVLINK_V2_MAGIC } from '../src/mavlink/mavlink_v2.ts';
 
 describe('MAVLink v2 Protocol Engine', () => {
   it('should encode HEARTBEAT packet with valid MAVLink v2 framing', () => {

@@ -76,6 +76,10 @@ export class TargetTracker {
     return this.lockedTargetId !== null;
   }
 
+  public isLaserDesignatorActive(): boolean {
+    return this.laserDesignatorActive;
+  }
+
   public getLockedTarget(): GroundTarget | null {
     if (!this.lockedTargetId) return null;
     return this.targets.find(t => t.id === this.lockedTargetId) || null;
